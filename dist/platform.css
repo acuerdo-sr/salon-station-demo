@@ -8,3 +8,73 @@
 @media(max-width:650px){.sidebar{transform:translateX(-100%);transition:transform .2s;width:220px;box-shadow:10px 0 40px #233c3420}.menu-open .sidebar{transform:translateX(0)}.admin-main{margin:0}.mobile-menu{display:inline-grid}.admin-topbar{height:60px;padding:0 15px}.breadcrumb{gap:5px}.topbar-tools{gap:7px}.connection-label{display:none}.admin-content{padding:22px 15px}.page-title{align-items:flex-start;margin-bottom:20px;gap:10px}.page-title h1{font-size:21px}.page-title p{font-size:10px;max-width:230px}.period-chip{font-size:9px;padding:6px 8px}.metric{padding:15px}.metric-value{font-size:25px;margin-top:14px}.metric-top{font-size:10px}.metric-top .icon{width:15px}.metric-bottom{font-size:9px}.panel-head{padding:18px 16px}.filter-bar{padding:0 16px 17px;gap:8px}.filter-search{max-width:none;flex-basis:100%}.filter-bar select{min-width:0;flex:1}td{padding:14px}th{padding:11px 14px}.admin-foot{flex-direction:column;gap:4px}.page-title .btn{font-size:10px;padding:8px 11px}.page-title .btn .icon{display:none}.role-info{font-size:10px}.demo-ribbon{gap:10px;font-size:8px;letter-spacing:0}.store-header{gap:10px;padding:0 20px;height:76px}.store-logo{font-size:19px;letter-spacing:1.3px}.store-logo small{font-size:6px;letter-spacing:2.7px;margin-top:8px}.store-header-actions{gap:10px}.store-header-actions button{padding:5px 0;gap:3px}.store-header-actions .icon{width:19px}.store-nav{justify-content:space-evenly;gap:0;height:44px;font-size:9px}.store-hero{margin:0;grid-template-columns:1fr;min-height:0}.store-hero-copy{padding:34px 28px 30px}.store-hero-copy h1{font-size:29px;line-height:1.7;margin-bottom:14px}.store-hero-copy .eyebrow{margin-bottom:15px}.store-hero-copy p{font-size:10px}.store-hero-copy .btn{margin-top:20px;padding:11px 18px;font-size:10px}.store-hero-visual{min-height:0;height:270px}.hero-main-img{object-position:center 47%}.hero-small-card{top:16px;right:18px;font-size:8px}.hero-caption{font-size:8px;left:20px;right:20px;bottom:15px}.store-benefits{margin:0 16px;padding:20px 0;gap:10px}.store-benefits>div{flex-direction:column;gap:8px;text-align:center;padding-right:8px}.store-benefits .icon{width:21px;height:21px}.store-benefits b{font-size:9px}.store-benefits small{font-size:7px}.store-content{padding:33px 18px 45px}.store-section-head h2{font-size:25px}.store-section-head h2 span{font-size:9px;margin-left:10px}.store-section-head .eyebrow{font-size:8px}.store-section-head>p{font-size:9px;white-space:nowrap}.product-tools{gap:15px;margin-bottom:20px}.category-pills{gap:6px}.category-pills button{font-size:9px;padding:7px 10px}.product-search{width:100%}.product-search input{width:100%;flex:1;min-width:0}.product-search select{width:125px}.product-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:27px 14px}.product-card .photo{aspect-ratio:.84}.product-tag{font-size:6px;left:7px;top:8px;padding:3px 5px;letter-spacing:0}.favorite-btn{width:26px;height:26px;right:5px;top:5px}.brand-label{font-size:6px;letter-spacing:.7px;margin-top:12px}.product-name{font-size:11px;line-height:1.8}.product-card .size{font-size:9px}.add-cart{font-size:9px;min-height:34px}.salon-message{align-items:flex-start;flex-wrap:wrap;gap:15px;padding:22px 20px}.salon-monogram{width:42px;height:42px;font-size:22px}.salon-message>div:nth-child(2){flex:1;min-width:170px}.salon-message h3{font-size:14px}.salon-message p{font-size:9px}.salon-message button{margin-left:57px}.footer-top{align-items:flex-start;flex-direction:column;gap:25px}.footer-links{flex-wrap:wrap;gap:15px;font-size:9px}.footer-bottom{flex-direction:column;gap:8px;font-size:8px}.store-page{padding:30px 18px 45px}.store-page h1{font-size:24px}.order-card{padding:17px}.order-card-head,.order-card-foot{flex-wrap:wrap}.account-panel{padding:21px}.detail-product{grid-template-columns:1fr}.detail-product>img{max-height:220px;object-fit:cover}.modal-body{padding:21px}.modal-head{padding:17px 21px}.modal-head h2{font-size:16px}.form-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.detail-list{grid-template-columns:80px 1fr;padding:15px;font-size:11px}.form-actions{flex-wrap:wrap}.cart-line{gap:12px}.cart-line img{width:60px;height:78px}.cart-line>strong{font-size:12px}.copy-row{flex-wrap:wrap}.copy-row .btn{width:100%}}
 .qr-preview{display:flex;justify-content:center;padding:15px;background:#f6f8f1;border-radius:8px}.qr-preview img{image-rendering:pixelated}
 .period-chip{width:auto;min-width:145px;flex-shrink:0}.page-title>div:first-child{min-width:0}.panel-head .chart-legend{white-space:nowrap}
+
+/* Desktop storefront: readable type at normal browser zoom. */
+@media (min-width:901px) {
+  .store-body{font-size:16px}
+  .store-body .demo-ribbon{font-size:12px;padding:9px 20px}
+  .store-body .demo-ribbon span{font-size:11px}
+  .store-body .store-header{min-height:104px;height:auto;padding-top:22px;padding-bottom:22px}
+  .store-body .store-logo small{font-size:10px}
+  .store-body .store-header-actions button,.store-body .salon-select{font-size:14px}
+  .store-body .salon-select b{font-size:16px}
+  .store-body .cart-count{font-size:12px;min-width:21px;height:21px;line-height:21px}
+  .store-body .store-nav{font-size:15px;height:58px}
+  .store-body .eyebrow,.store-body .store-hero-copy .eyebrow{font-size:12px}
+  .store-body .store-hero-copy h1{font-size:clamp(36px,3vw,52px);line-height:1.7}
+  .store-body .store-hero-copy p{font-size:16px;line-height:2}
+  .store-body .btn,.store-body .store-hero-copy .btn{font-size:16px;min-height:46px}
+  .store-body .btn.small,.store-body .text-link{font-size:14px}
+  .store-body .hero-caption,.store-body .hero-small-card{font-size:12px}
+  .store-body .hero-small-card strong{font-size:18px}
+  .store-body .store-benefits{max-width:1160px}
+  .store-body .store-benefits b{font-size:15px}
+  .store-body .store-benefits small{font-size:13px}
+  .store-body .store-section-head h2{font-size:32px}
+  .store-body .store-section-head h2 span{font-size:15px}
+  .store-body .store-section-head>p{font-size:14px}
+  .store-body .category-pills button{font-size:14px}
+  .store-body .product-search input{font-size:14px;width:250px}
+  .store-body .product-search select{font-size:14px;width:160px}
+  .store-body .product-tools{flex-wrap:wrap}
+  .store-body .product-tag{font-size:11px}
+  .store-body .brand-label{font-size:12px}
+  .store-body .product-name{font-size:18px;line-height:1.7}
+  .store-body .product-card .size{font-size:14px}
+  .store-body .product-card .price{font-size:23px}
+  .store-body .price small{font-size:12px}
+  .store-body .product-bottom{flex-wrap:wrap;gap:12px}
+  .store-body .add-cart{font-size:14px;min-height:42px}
+  .store-body .add-cart .icon{width:17px;height:17px}
+  .store-body .soldout-layer{font-size:14px}
+  .store-body .salon-message{flex-wrap:wrap}
+  .store-body .salon-message .eyebrow{font-size:11px}
+  .store-body .salon-message h3{font-size:22px}
+  .store-body .salon-message p,.store-body .salon-message button{font-size:14px}
+  .store-body .footer-top,.store-body .footer-links,.store-body .footer-bottom{flex-wrap:wrap}
+  .store-body .footer-links{font-size:14px}
+  .store-body .footer-bottom{font-size:12px}
+  .store-body .store-page h1{font-size:34px}
+  .store-body .account-panel h2{font-size:22px}
+  .store-body .account-panel p,.store-body label,.store-body input,.store-body select,.store-body textarea{font-size:16px}
+  .store-body .subtle-note,.store-body .notice,.store-body .error,.store-body .description{font-size:14px}
+  .store-body .badge{font-size:13px}
+  .store-body .order-card-head b,.store-body .order-card-foot>div{font-size:15px}
+  .store-body .order-card-head small,.store-body .order-line small{font-size:13px}
+  .store-body .order-line strong{font-size:16px}
+  .store-body .order-card-foot>div strong{font-size:22px}
+  .store-body .modal-head h2{font-size:22px}
+  .store-body .modal-body h3{font-size:19px}
+  .store-body .cart-line h3,.store-body .cart-line>strong{font-size:16px}
+  .store-body .cart-line p,.store-body .qty-control span,.store-body .remove-item{font-size:14px}
+  .store-body .qty-control button{width:34px;height:34px}
+  .store-body .total-list>div,.store-body .detail-list,.store-body .timeline li,.store-body .shipment{font-size:15px}
+  .store-body .total-list .grand{font-size:22px}
+  .store-body .timeline time{font-size:13px}
+  .store-body .detail-product h3{font-size:24px}
+  .store-body .salon-choice b,.store-body .login-tabs button{font-size:16px}
+  .store-body .salon-choice small,.store-body .flow-steps{font-size:14px}
+  .store-body .review-salon,.store-body .return-reason,.store-body .success-copy p{font-size:15px}
+  .store-body .review-salon b{font-size:16px}
+  .store-body #toast{font-size:15px}
+}
