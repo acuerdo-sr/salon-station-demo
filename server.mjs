@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { products } from './catalog.mjs';
 import { createAuth } from './auth.mjs';
+import { createPlatformServer } from './platform-server.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.DATA_DIR || path.join(root, 'data');
@@ -16,10 +17,11 @@ db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL);`);
 if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'member_id')) db.exec('ALTER TABLE orders ADD COLUMN member_id TEXT');
 const auth = createAuth(db);
+const platformServer = createPlatformServer(db,products,auth);
 const seed = db.prepare('INSERT OR IGNORE INTO products VALUES (?, ?, ?)');
 for (const p of products) seed.run(p.id, p.price, p.stock);
 const catalog = () => products.map(p => ({ ...p, ...db.prepare('SELECT price, stock FROM products WHERE id=?').get(p.id) }));
-const port = Number(process.env.PORT || 4173);
+const port = Number(process.env.PORT || 4175);
 const origin = `http://127.0.0.1:${port}`;
 function json(res, status, body) { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); }
 function fail(message, status=400) { const e=new Error(message); e.status=status; throw e; }
@@ -62,6 +64,10 @@ const server = http.createServer(async (req, res) => {
   if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) return json(res,403,{error:'ローカルホストからアクセスしてください。'});
   const url = new URL(req.url, origin);
   if(!['GET','HEAD'].includes(req.method) && ![origin,`http://localhost:${port}`].includes(req.headers.origin)) return json(res,403,{error:'同じローカルサイトから操作してください。'});
+  if(url.pathname.startsWith('/api/platform/')) {
+   try {return json(res,200,await platformServer.request(url.pathname.slice('/api/platform'.length),req.method,req.method==='GET'?undefined:await readBody(req),req,res));}
+   catch(error){return json(res,error.status||400,{error:error.message});}
+  }
   if (url.pathname.startsWith('/api/auth/')) {
    try { return json(res,200,await auth.request(url.pathname, req.method, req.method==='GET'?undefined:await readBody(req),req,res)); }
    catch(error){return json(res,error.status||400,{error:error.message});}
@@ -98,7 +104,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/api/')) return json(res,404,{error:'この操作は利用できません。'});
   if (req.method !== 'GET' && req.method !== 'HEAD') return json(res,405,{error:'Method not allowed'});
-  const relative = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+  const relative = decodeURIComponent(url.pathname === '/' || url.pathname === '/index.html' ? '/shop.html' : url.pathname);
   const staticRoot = path.join(root,'dist');
   const file = path.resolve(staticRoot, '.' + relative);
   if (!file.startsWith(staticRoot + path.sep)) return json(res,403,{error:'Forbidden'});

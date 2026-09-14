@@ -1,5 +1,5 @@
-$ErrorActionPreference = 'Stop'
-$pidFile = Join-Path $PSScriptRoot 'server.pid'
+﻿$ErrorActionPreference = 'Stop'
+$pidFile = Join-Path $PSScriptRoot 'platform.pid'
 if (-not (Test-Path -LiteralPath $pidFile)) { Write-Output 'No recorded background server. For npm start, use Ctrl+C in its terminal.'; exit }
 $serverProcessId = [int](Get-Content -LiteralPath $pidFile)
 $serverProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $serverProcessId"

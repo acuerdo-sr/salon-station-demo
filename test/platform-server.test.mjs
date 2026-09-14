@@ -1,0 +1,38 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {mkdtemp,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+test('HTTP: operator session, role isolation, atomic oversell protection and restart persistence',async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'salon-platform-test-')),port=14822,base=`http://127.0.0.1:${port}`;let child;
+ const start=async()=>{child=spawn(process.execPath,['server.mjs'],{cwd:new URL('..',import.meta.url),env:{...process.env,PORT:String(port),DATA_DIR:dir},stdio:['ignore','pipe','pipe'],windowsHide:true});await new Promise((resolve,reject)=>{child.stdout.on('data',d=>{if(d.toString().includes('local demo:'))resolve();});child.on('error',reject);child.on('exit',c=>reject(Error('server exited '+c)));});};
+ const stop=async()=>{const done=once(child,'exit');child.kill();await done;};
+ const call=async(route,method='GET',body,cookie='',origin=base)=>{const r=await fetch(base+'/api'+route,{method,headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie},body:body===undefined?undefined:JSON.stringify(body)});return {status:r.status,body:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};};
+ try{await start();assert.equal((await call('/platform/admin/snapshot')).status,401);
+  assert.equal((await call('/platform/operator/login','POST',{email:'admin@example.test',password:'bad'})).status,401);
+  const a=await call('/platform/operator/login','POST',{email:'admin@example.test',password:'Demo-Admin-2026'});assert.equal(a.status,200);const ac=a.cookie;
+  const m=await call('/auth/register','POST',{name:'デモ利用者',salon:'LUMIÈRE',email:'buyer@example.test',password:'Demo-Member-2026'}),mc=m.cookie;
+  assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},mc)).status,200);
+  const before=(await call('/platform/admin/snapshot','GET',undefined,ac)).body.orders.length;
+  await call('/platform/admin/products/shampoo-moist','PATCH',{stock:1,price:2860,cost:1716,enabled:true},ac);
+  const order={salonId:'lumiere',items:[{id:'shampoo-moist',price:2860,quantity:1}],customer:{name:'デモ利用者',postal:'0000000',address:'架空県 1-2-3'}};
+  const input={...order,requestKey:crypto.randomUUID()};
+  const results=await Promise.all([call('/platform/orders','POST',input,mc),call('/platform/orders','POST',{...order,requestKey:crypto.randomUUID()},mc)]);
+  assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);const saved=results.find(r=>r.status===200).body;
+  assert.equal((await call('/platform/orders','GET',undefined,mc)).body.length,1);
+  const b=await call('/auth/register','POST',{name:'別会員',salon:'LUMIÈRE',email:'other@example.test',password:'Demo-Member-2026'});
+  assert.equal((await call('/platform/orders','GET',undefined,b.cookie)).body.length,0);
+  assert.equal((await call('/platform/admin/products/shampoo-moist','PATCH',{stock:5,price:1,cost:1,enabled:true},mc)).status,401);
+  assert.equal((await call('/platform/admin/products/shampoo-moist','PATCH',{stock:5,price:1,cost:1,enabled:true},ac,'https://evil.test')).status,403);
+  const d=await call('/platform/operator/login','POST',{email:'dealer@example.test',password:'Demo-Admin-2026'}),dc=d.cookie;
+  const snapshot=(await call('/platform/admin/snapshot','GET',undefined,dc)).body;assert.equal(snapshot.orders.length,0);assert.ok(snapshot.purchaseOrders.every(p=>p.dealerId==='sena'));
+  const po=snapshot.purchaseOrders.find(p=>p.orderId===saved.id);assert.ok(po);
+  assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'accepted'},dc)).status,200);
+  assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'DEMO-987654'},dc)).status,200);
+  const mine=(await call('/platform/orders','GET',undefined,mc)).body[0];assert.equal(mine.status,'shipped');assert.equal(mine.shipments[0].tracking,'DEMO-987654');
+  await stop();await start();assert.equal((await call('/platform/orders','GET',undefined,mc)).body[0].id,saved.id);assert.equal((await call('/platform/admin/snapshot','GET',undefined,ac)).body.orders.length,before+1);
+  await call('/platform/operator/logout','POST',{},ac);assert.equal((await call('/platform/admin/snapshot','GET',undefined,ac)).status,401);
+ }finally{if(child?.exitCode===null)await stop();assert.ok(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep+'salon-platform-test-'));await rm(dir,{recursive:true,force:true});}
+});

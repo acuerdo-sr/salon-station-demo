@@ -2,6 +2,15 @@
   "name": "salon-station-local-demo",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server.mjs", "build:pages": "node scripts/build-pages.mjs", "test": "node --test test/server.test.mjs test/demo-store.test.mjs test/member-store.test.mjs" },
-  "engines": { "node": ">=22.13.0" }
+  "scripts": {
+    "start": "node server.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "qrcode-generator": "2.0.4"
+  }
 }
