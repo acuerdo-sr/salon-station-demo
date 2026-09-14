@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { products } from './catalog.mjs';
+import { createAuth } from './auth.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.DATA_DIR || path.join(root, 'data');
@@ -13,6 +14,8 @@ const db = new DatabaseSync(path.join(dataDir, 'shop.sqlite'));
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, price INTEGER NOT NULL CHECK(price>=0), stock INTEGER NOT NULL CHECK(stock>=0));
  CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL);`);
+if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'member_id')) db.exec('ALTER TABLE orders ADD COLUMN member_id TEXT');
+const auth = createAuth(db);
 const seed = db.prepare('INSERT OR IGNORE INTO products VALUES (?, ?, ?)');
 for (const p of products) seed.run(p.id, p.price, p.stock);
 const catalog = () => products.map(p => ({ ...p, ...db.prepare('SELECT price, stock FROM products WHERE id=?').get(p.id) }));
@@ -59,21 +62,30 @@ const server = http.createServer(async (req, res) => {
   if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) return json(res,403,{error:'ローカルホストからアクセスしてください。'});
   const url = new URL(req.url, origin);
   if(!['GET','HEAD'].includes(req.method) && ![origin,`http://localhost:${port}`].includes(req.headers.origin)) return json(res,403,{error:'同じローカルサイトから操作してください。'});
+  if (url.pathname.startsWith('/api/auth/')) {
+   try { return json(res,200,await auth.request(url.pathname, req.method, req.method==='GET'?undefined:await readBody(req),req,res)); }
+   catch(error){return json(res,error.status||400,{error:error.message});}
+  }
   if (url.pathname === '/api/products' && req.method === 'GET') return json(res,200,catalog());
-  if (url.pathname === '/api/orders' && req.method === 'GET') return json(res,200,db.prepare('SELECT payload FROM orders ORDER BY created_at DESC').all().map(r=>JSON.parse(r.payload)));
+  if (url.pathname === '/api/orders' && req.method === 'GET') {
+   const memberId=auth.member(req)?.id??null;
+   return json(res,200,db.prepare('SELECT payload FROM orders WHERE member_id IS ? ORDER BY created_at DESC').all(memberId).map(r=>JSON.parse(r.payload)));
+  }
   if (url.pathname === '/api/quote' && req.method === 'POST') return json(res,200,calculate(await readBody(req)));
   if (url.pathname === '/api/orders' && req.method === 'POST') {
    const input=await readBody(req);
+   const memberId=auth.member(req)?.id??null;
+   if(input?.memberId!==undefined&&input.memberId!==memberId) fail('ログイン状態が変わりました。カートから確認し直してください。',401);
    if(!input||typeof input.requestKey!=='string'||!/^[a-f0-9-]{36}$/.test(input.requestKey)) fail('注文の識別子が不正です。');
-   const existing=db.prepare('SELECT payload FROM orders WHERE request_key=?').get(input.requestKey);
-   if(existing) return json(res,200,JSON.parse(existing.payload));
+   const existing=db.prepare('SELECT payload, member_id FROM orders WHERE request_key=?').get(input.requestKey);
+   if(existing) {if(existing.member_id!==memberId) fail('この注文は取得できません。',403);return json(res,200,JSON.parse(existing.payload));}
    const customer=customerData(input.customer);
    db.exec('BEGIN IMMEDIATE');
    try {
     const quote=calculate(input);
-    const order={id:'DEMO-'+randomUUID().slice(0,8).toUpperCase(),createdAt:new Date().toISOString(),status:'テスト注文受付',customer,...quote};
+    const order={id:'DEMO-'+randomUUID().slice(0,8).toUpperCase(),createdAt:new Date().toISOString(),status:'テスト注文受付',memberId,customer,...quote};
     for(const item of quote.items) db.prepare('UPDATE products SET stock=stock-? WHERE id=?').run(item.quantity,item.id);
-    db.prepare('INSERT INTO orders VALUES (?, ?, ?, ?)').run(order.id,input.requestKey,order.createdAt,JSON.stringify(order));
+    db.prepare('INSERT INTO orders (id,request_key,created_at,payload,member_id) VALUES (?, ?, ?, ?, ?)').run(order.id,input.requestKey,order.createdAt,JSON.stringify(order),memberId);
     db.exec('COMMIT'); return json(res,201,order);
    } catch(e){db.exec('ROLLBACK');throw e;}
   }

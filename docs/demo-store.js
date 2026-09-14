@@ -1,5 +1,5 @@
 // GitHub Pages only: simulated commerce state stays in the visitor's browser.
-export function createDemoStore(initialProducts, storage, key) {
+export function createDemoStore(initialProducts, storage, key, currentMember = () => null) {
   function read() {
     const raw = storage.getItem(key);
     if (!raw) return { version: 1, overrides: {}, orders: [] };
@@ -48,15 +48,17 @@ export function createDemoStore(initialProducts, storage, key) {
   }
   return function request(route, method = 'GET', input) {
     const state = read();
+    const memberId = currentMember()?.id ?? null;
     if (route === '/products' && method === 'GET') return catalog(state);
-    if (route === '/orders' && method === 'GET') return state.orders.map(({ requestKey, ...order }) => order).reverse();
+    if (route === '/orders' && method === 'GET') return state.orders.filter(order => (order.memberId ?? null) === memberId).map(({ requestKey, ...order }) => order).reverse();
     if (route === '/quote' && method === 'POST') return quote(input, state);
     if (route === '/orders' && method === 'POST') {
+      if (input?.memberId !== undefined && input.memberId !== memberId) throw Error('ログイン状態が変わりました。カートから確認し直してください。');
       if (!/^[a-f0-9-]{36}$/.test(input?.requestKey || '')) throw Error('注文の識別子が不正です。');
       const existing = state.orders.find(o => o.requestKey === input.requestKey);
-      if (existing) { const { requestKey, ...order } = existing; return order; }
+      if (existing) { if ((existing.memberId ?? null) !== memberId) throw Error('この注文は取得できません。'); const { requestKey, ...order } = existing; return order; }
       const details = quote(input, state);
-      const order = { id: 'DEMO-' + crypto.randomUUID().slice(0, 8).toUpperCase(), createdAt: new Date().toISOString(), status: 'テスト注文受付', customer: customer(input.customer), ...details };
+      const order = { id: 'DEMO-' + crypto.randomUUID().slice(0, 8).toUpperCase(), createdAt: new Date().toISOString(), status: 'テスト注文受付', memberId, customer: customer(input.customer), ...details };
       const products = catalog(state);
       for (const item of details.items) {
         const p = products.find(p => p.id === item.id);
