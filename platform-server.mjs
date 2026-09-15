@@ -1,11 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { createPlatform, platformRequest, demoOperators, DEMO_OPERATOR_PASSWORD } from './dist/platform-core.js';
+import { createPlatform, platformRequest, migrate, demoOperators, DEMO_OPERATOR_PASSWORD } from './dist/platform-core.js';
 import { passwordDigest, SESSION_AGE } from './dist/member-store.js';
 
 export function createPlatformServer(db,catalog,auth){
   db.exec(`CREATE TABLE IF NOT EXISTS platform_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS operator_sessions (token_hash TEXT PRIMARY KEY, operator_id TEXT NOT NULL, expires_at INTEGER NOT NULL);`);
   if(!db.prepare('SELECT id FROM platform_state WHERE id=1').get())db.prepare('INSERT INTO platform_state VALUES (1,?)').run(JSON.stringify(createPlatform(catalog)));
+  else{const stored=JSON.parse(db.prepare('SELECT payload FROM platform_state WHERE id=1').get().payload);if(migrate(stored,catalog)){stored.revision++;db.prepare('UPDATE platform_state SET payload=? WHERE id=1').run(JSON.stringify(stored));}}
   const credentials=passwordDigest(DEMO_OPERATOR_PASSWORD),attempts=new Map();
   const tokenHash=value=>createHash('sha256').update(value).digest('hex');
   const token=req=>(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('salon_operator='))?.slice(15)||'';
@@ -24,7 +25,7 @@ export function createPlatformServer(db,catalog,auth){
       attempts.delete(key);db.prepare('DELETE FROM operator_sessions WHERE token_hash=? OR expires_at<=?').run(tokenHash(token(req)),Date.now());
       const value=randomBytes(32).toString('hex');db.prepare('INSERT INTO operator_sessions VALUES (?,?,?)').run(tokenHash(value),op.id,Date.now()+SESSION_AGE);cookie(res,value,SESSION_AGE/1000);return {operator:op};
     }
-    const actor={operator:operator(req),member:auth.member(req)},mutates=method!=='GET'&&route!=='/quote';
+    const actor={operator:operator(req),member:auth.member(req)},mutates=method!=='GET'&&!['/quote','/admin/sales'].includes(route);
     if(mutates)db.exec('BEGIN IMMEDIATE');
     try{
       const state=JSON.parse(db.prepare('SELECT payload FROM platform_state WHERE id=1').get().payload);

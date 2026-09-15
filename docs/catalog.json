@@ -4,6 +4,10 @@
     "brand": "SENA PROFESSIONAL",
     "name": "モイストリペア シャンプー",
     "category": "シャンプー",
+    "concerns": [
+      "ダメージヘア対策",
+      "カラーケア"
+    ],
     "size": "500 mL",
     "price": 2860,
     "stock": 24,
@@ -17,6 +21,11 @@
     "brand": "SENA PROFESSIONAL",
     "name": "インテンシブ リペアマスク",
     "category": "トリートメント",
+    "concerns": [
+      "ダメージヘア対策",
+      "パーマケア",
+      "エイジングケア"
+    ],
     "size": "250 g",
     "price": 3520,
     "stock": 18,
@@ -30,6 +39,10 @@
     "brand": "SENA BOTANICAL",
     "name": "スムース フィニッシュオイル",
     "category": "ヘアオイル",
+    "concerns": [
+      "ダメージヘア対策",
+      "カラーケア"
+    ],
     "size": "100 mL",
     "price": 2640,
     "stock": 30,
@@ -43,6 +56,10 @@
     "brand": "SENA PROFESSIONAL",
     "name": "エアリーケア シャンプー",
     "category": "シャンプー",
+    "concerns": [
+      "ボリュームアップ",
+      "頭皮ケア"
+    ],
     "size": "500 mL",
     "price": 2640,
     "stock": 12,
@@ -56,6 +73,10 @@
     "brand": "SENA PROFESSIONAL",
     "name": "デイリーケア トリートメント",
     "category": "トリートメント",
+    "concerns": [
+      "エイジングケア",
+      "白髪対策"
+    ],
     "size": "250 g",
     "price": 3080,
     "stock": 15,
@@ -69,6 +90,10 @@
     "brand": "SENA BOTANICAL",
     "name": "リッチ モイスチャーオイル",
     "category": "ヘアオイル",
+    "concerns": [
+      "エイジングケア",
+      "パーマケア"
+    ],
     "size": "100 mL",
     "price": 3300,
     "stock": 0,

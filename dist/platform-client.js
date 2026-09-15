@@ -1,5 +1,5 @@
 import { api, isPages } from './api-client.js';
-import { createPlatform, platformRequest, demoOperators, DEMO_OPERATOR_PASSWORD } from './platform-core.js';
+import { createPlatform, platformRequest, migrate, demoOperators, DEMO_OPERATOR_PASSWORD } from './platform-core.js';
 export { api, isPages };
 const base=new URL('.',import.meta.url).pathname,key=`salon-platform-v1:${base}`,opKey=key+':operator';
 let catalogPromise;
@@ -16,10 +16,10 @@ export async function platform(route,method='GET',input){
       sessionStorage.setItem(opKey,JSON.stringify({id:selected.id,expiresAt:Date.now()+86400000}));return {operator:selected};
     }
     catalogPromise??=fetch(new URL('./catalog.json',import.meta.url)).then(r=>{if(!r.ok)throw Error('商品データを取得できません。');return r.json();});
-    let state;const raw=localStorage.getItem(key);if(raw){try{state=JSON.parse(raw);}catch{throw Error('保存データを読み込めません。');}}else state=createPlatform(await catalogPromise);
+    let state,raw=localStorage.getItem(key);if(raw){try{state=JSON.parse(raw);}catch{throw Error('保存データを読み込めません。');}if(migrate(state,await catalogPromise))raw=null;}else state=createPlatform(await catalogPromise);
     const {member}=await api('/auth/me');
     const result=platformRequest(state,route,method,input,{operator,member});
-    if(!raw||method!=='GET'&&route!=='/quote'){state.revision++;try{localStorage.setItem(key,JSON.stringify(state));}catch{throw Error('保存できません。ブラウザの保存設定を確認してください。');}}
+    if(!raw||method!=='GET'&&!['/quote','/admin/sales'].includes(route)){state.revision++;try{localStorage.setItem(key,JSON.stringify(state));}catch{throw Error('保存できません。ブラウザの保存設定を確認してください。');}}
     return result;
   };
   // Use a separate lock from membership to avoid nesting the same lock.

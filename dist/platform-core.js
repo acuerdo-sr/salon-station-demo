@@ -12,15 +12,60 @@ const clone = value => structuredClone(value);
 function fail(message,status=400){ const error=new Error(message);error.status=status;throw error; }
 const required=(value,max=120)=>{if(typeof value!=='string'||!value.trim()||value.trim().length>max)fail('入力内容を確認してください。');return value.trim();};
 const int=(value,min,max)=>{if(!Number.isInteger(value)||value<min||value>max)fail(`${min}〜${max}の整数で入力してください。`);return value;};
+const optional=(value,max)=>{if(value==null)return '';if(typeof value!=='string'||value.trim().length>max)fail(`${max}文字以内で入力してください。`);return value.trim();};
+// 店舗マスタ項目（仕様書 2.6.1）。salon ロールは自店舗の基本情報のみ、admin は全項目を編集できる。
+export const salonBasicFields=['name','prefecture','city','street','building','phone','hours','holiday','notes','description','area'];
+function salonInput(input){
+  const s={name:required(input?.name,80),prefecture:required(input?.prefecture,10),city:required(input?.city,50),street:required(input?.street,100),building:optional(input?.building,100),phone:required(input?.phone,15),hours:optional(input?.hours,50),holiday:optional(input?.holiday,50),notes:optional(input?.notes,500),description:optional(input?.description,120),area:optional(input?.area,60)};
+  if(!/^[0-9-]+$/.test(s.phone))fail('電話番号は半角数字・ハイフンで入力してください。');
+  return s;
+}
+function staffList(value,existing=[]){
+  const names=Array.isArray(value)?value:String(value??'').split(/[\n,、，]/);
+  const list=[];for(const raw of names){const name=String(raw).trim();if(!name)continue;if(name.length>40)fail('スタッフ名は40文字以内で入力してください。');if(list.some(s=>s.name===name))continue;list.push(existing.find(s=>s.name===name)||{id:'st-'+crypto.randomUUID().slice(0,6),name});}
+  if(list.length>30)fail('スタッフは30名以内で登録してください。');
+  return list;
+}
+function nextSalonId(state){let n=state.salons.length+1,id;do{id='S'+String(n++).padStart(3,'0');}while(state.salons.some(s=>s.id===id));return id;}
+const jst=iso=>new Date(new Date(iso).getTime()+9*3600000).toISOString();
+// 販売実績集計（仕様書 2.2.5）：期間（日次・月次・年次・任意）× 店舗別／全店舗で 販売金額（税込・送料除く）・受注件数・顧客数を集計する。
+export const salesUnits={day:'日次',month:'月次',year:'年次',range:'任意期間'};
+export function salesReport(state,input,actor,now=new Date().toISOString()){
+  const op=requireOperator(actor,['admin','salon']);
+  const unit=Object.hasOwn(salesUnits,String(input?.unit))?input.unit:'month';
+  const day=v=>{if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v)||Number.isNaN(Date.parse(v)))fail('集計期間は YYYY-MM-DD 形式で指定してください。');return v;};
+  const to=input?.to?day(input.to):jst(now).slice(0,10);
+  const from=input?.from?day(input.from):new Date(Date.parse(to)-29*86400000).toISOString().slice(0,10);
+  if(from>to)fail('開始日は終了日以前の日付にしてください。');
+  if(Date.parse(to)-Date.parse(from)>366*3*86400000)fail('集計期間は3年以内で指定してください。');
+  const salons=state.salons.filter(s=>op.role==='admin'||s.id===op.salonId);
+  const orders=state.orders.filter(o=>!['cancelled','returned'].includes(o.status)&&salons.some(s=>s.id===o.salonId)&&jst(o.createdAt).slice(0,10)>=from&&jst(o.createdAt).slice(0,10)<=to);
+  const bucket=o=>unit==='day'?jst(o.createdAt).slice(0,10):unit==='month'?jst(o.createdAt).slice(0,7):unit==='year'?jst(o.createdAt).slice(0,4):`${from}〜${to}`;
+  const summarize=rows=>({sales:rows.reduce((s,o)=>s+o.subtotal,0),orders:rows.length,customers:new Set(rows.map(o=>o.memberId)).size});
+  const periods=[...new Set(orders.map(bucket))].sort();
+  const rows=periods.map(period=>{const inPeriod=orders.filter(o=>bucket(o)===period);return {period,salons:salons.map(s=>({salonId:s.id,salonName:s.name,...summarize(inPeriod.filter(o=>o.salonId===s.id))})),total:summarize(inPeriod)};});
+  return {from,to,unit,unitName:salesUnits[unit],rows,salons:salons.map(s=>({salonId:s.id,salonName:s.name,...summarize(orders.filter(o=>o.salonId===s.id))})),total:summarize(orders)};
+}
 function log(state,actor,action,reference,now){state.events.unshift({id:crypto.randomUUID(),at:now,actor:actor?.name||'会員',action,reference});state.events=state.events.slice(0,400);}
+
+// 店舗マスタ（仕様書 2.6.1）：住所・電話番号・営業時間・定休日・備考を保持する。すべて架空。
+const seedSalons=()=>[
+  {id:'lumiere',name:'LUMIÈRE 表参道',area:'TOKYO / OMOTESANDO',description:'髪と暮らしに、やさしい余白を。',owner:'ルミエール株式会社（架空）',prefecture:'東京都',city:'渋谷区',street:'神宮前0-0-0',building:'デモビル 2F',phone:'03-0000-0000',hours:'10:00〜20:00',holiday:'毎週火曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'haruka',name:'HARUKA'},{id:'yui',name:'YUI'}]},
+  {id:'atelier',name:'atelier 凪',area:'FUKUOKA / YAKUIN',description:'あなたらしい美しさを、毎日のケアから。',owner:'アトリエ凪（架空）',prefecture:'福岡県',city:'福岡市中央区',street:'薬院0-0-0',building:'',phone:'092-000-0000',hours:'9:30〜19:00',holiday:'毎週月曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'mio',name:'MIO'},{id:'ren',name:'REN'}]},
+  {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',prefecture:'山口県',city:'萩市',street:'椿東0-0-0',building:'',phone:'0838-00-0000',hours:'9:00〜18:00',holiday:'毎週月曜日・第3日曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'aoi',name:'AOI'}]},
+];
+// 保存済みの状態（SQLite / ブラウザ）に、後から追加した項目（お悩みカテゴリ・店舗住所・会員任意項目）を補う。
+export function migrate(state,catalog){
+  let changed=false;
+  for(const p of state.products||[]){const src=catalog.find(c=>c.id===p.id);if(!Array.isArray(p.concerns)){p.concerns=[...(src?.concerns||[])];changed=true;}}
+  for(const s of state.salons||[]){if(s.prefecture===undefined){const d=seedSalons().find(x=>x.id===s.id)||{};Object.assign(s,{prefecture:d.prefecture||'',city:d.city||'',street:d.street||'',building:d.building||'',phone:d.phone||'',hours:d.hours||'',holiday:d.holiday||'',notes:d.notes||''});changed=true;}}
+  for(const p of state.profiles||[])for(const k of ['kana','phone','gender','birthday'])if(p[k]===undefined){p[k]='';changed=true;}
+  return changed;
+}
 
 export function createPlatform(catalog,now=new Date().toISOString()){
   const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
-    salons:[
-      {id:'lumiere',name:'LUMIÈRE 表参道',area:'TOKYO / OMOTESANDO',description:'髪と暮らしに、やさしい余白を。',owner:'ルミエール株式会社（架空）',feeRate:5,enabled:true,staff:[{id:'haruka',name:'HARUKA'},{id:'yui',name:'YUI'}]},
-      {id:'atelier',name:'atelier 凪',area:'FUKUOKA / YAKUIN',description:'あなたらしい美しさを、毎日のケアから。',owner:'アトリエ凪（架空）',feeRate:5,enabled:true,staff:[{id:'mio',name:'MIO'},{id:'ren',name:'REN'}]},
-      {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',feeRate:5,enabled:true,staff:[{id:'aoi',name:'AOI'}]},
-    ],dealers:[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}],profiles:[],orders:[],purchaseOrders:[],events:[]};
+    salons:seedSalons(),dealers:[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}],profiles:[],orders:[],purchaseOrders:[],events:[]};
   // Clearly fictional examples make the management screens useful on first visit.
   for(let i=0;i<8;i++){
     const salon=state.salons[i%3],product=state.products[i%5];
@@ -83,15 +128,17 @@ function restore(state,order){if(order.stockRestored)return;order.items.forEach(
 function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.cost*p.quantity,0),voided=['cancelled','returned'].includes(order.status);return {orderId:order.id,salonId:order.salonId,salonName:order.salonName,at:order.createdAt,status:order.status,sales:voided?0:order.subtotal,purchase:voided?0:purchase,fee:voided?0:order.fee,proceeds:voided?0:order.subtotal-purchase-order.fee,refunded:voided?order.total:0,pending:order.status==='return_requested'};}
 
 export function platformRequest(state,route,method='GET',input,actor={},now=new Date().toISOString()){
-  if(route==='/bootstrap'&&method==='GET')return {products:safeProducts(state),salons:clone(state.salons.filter(s=>s.enabled)),dealers:clone(state.dealers),revision:state.revision};
+  // クローズドサイト（仕様書 2.2.6）：未ログインには商品・価格を返さない。サロン一覧は会員登録時の選択用に返す。
+  if(route==='/bootstrap'&&method==='GET')return {closed:true,products:actor.member||actor.operator?safeProducts(state):[],salons:clone(state.salons.filter(s=>s.enabled)).map(({feeRate,notes,...s})=>s),dealers:clone(state.dealers),revision:state.revision};
   if(route==='/profile'&&method==='GET')return clone(currentProfile(state,actor.member)||null);
   if(route==='/profile'&&method==='PATCH'){
     if(!actor.member)fail('会員ログインが必要です。',401);const salon=salonFor(state,input?.salonId);if(!salon.enabled)fail('このサロンは現在ご利用いただけません。');
     if(input.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
-    const previous=currentProfile(state,actor.member),profile={id:actor.member.id,name:actor.member.name,email:actor.member.email,salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
+    const m=actor.member,previous=currentProfile(state,m),profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
     state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',profile.id,now);return clone(profile);
   }
-  if(route==='/quote'&&method==='POST')return cleanQuote(quote(state,input));
+  if(route==='/quote'&&method==='POST'){if(!actor.member)fail('会員ログインが必要です。',401);return cleanQuote(quote(state,input));}
+  if(route==='/admin/sales'&&method==='POST')return salesReport(state,input,actor,now);
   if(route==='/orders'&&method==='POST')return customerOrder(state,placeOrder(state,input,actor,now));
   if(route==='/orders'&&method==='GET'){if(!actor.member)fail('会員ログインが必要です。',401);return state.orders.filter(o=>o.memberId===actor.member.id).map(o=>customerOrder(state,o));}
   const customerAction=route.match(/^\/orders\/([^/]+)\/(cancel|return)$/);
@@ -143,9 +190,32 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     else if(['price','cost','enabled'].some(k=>input[k]!==undefined))fail('ディーラーは在庫数のみ更新できます。',403);
     Object.assign(p,update);log(state,op,'商品・在庫を更新',p.sku,now);return clone(p);
   }
+  // 店舗登録（仕様書 2.1.1 / AD-002）：店舗IDは自動採番。QRコードは店舗IDから都度生成する。
+  if(route==='/admin/salons'&&method==='POST'){
+    const op=requireOperator(actor,['admin']);
+    const salon={id:nextSalonId(state),...salonInput(input),owner:required(input?.owner,100),feeRate:int(input?.feeRate??5,0,30),enabled:input?.enabled!==false,staff:staffList(input?.staff)};
+    state.salons.push(salon);log(state,op,'店舗を登録',salon.id,now);return clone(salon);
+  }
   const salonAction=route.match(/^\/admin\/salons\/([^/]+)$/);
   if(salonAction&&method==='PATCH'){
-    const op=requireOperator(actor,['admin']),salon=salonFor(state,salonAction[1]);const update={name:required(input?.name,80),owner:required(input?.owner,100),feeRate:int(input?.feeRate,0,30)};if(typeof input.enabled!=='boolean')fail('受付設定を確認してください。');update.enabled=input.enabled;Object.assign(salon,update);log(state,op,'店舗設定を更新',salon.id,now);return clone(salon);
+    const op=requireOperator(actor,['admin','salon']),salon=salonFor(state,salonAction[1]);
+    if(op.role==='salon'&&op.salonId!==salon.id)fail('他店舗の情報は編集できません。',403);
+    const update=salonInput({...salon,...input});
+    if(op.role==='admin'){update.owner=required(input?.owner??salon.owner,100);update.feeRate=int(input?.feeRate??salon.feeRate,0,30);if(input?.enabled!==undefined&&typeof input.enabled!=='boolean')fail('受付設定を確認してください。');update.enabled=input?.enabled??salon.enabled;if(input?.staff!==undefined)update.staff=staffList(input.staff,salon.staff);}
+    else if(['owner','feeRate','enabled','staff'].some(k=>input?.[k]!==undefined))fail('サロン担当者は運用料率・受付設定・販売事業者名を変更できません。',403);
+    Object.assign(salon,update);log(state,op,op.role==='admin'?'店舗設定を更新':'サロン情報を編集',salon.id,now);return clone(salon);
+  }
+  if(salonAction&&method==='DELETE'){
+    const op=requireOperator(actor,['admin']),salon=salonFor(state,salonAction[1]);
+    if(state.orders.some(o=>o.salonId===salon.id)||state.profiles.some(p=>p.salonId===salon.id))fail('受注または会員が紐付いている店舗は削除できません。「新しい注文を受け付ける」を外して休止してください。',409);
+    state.salons=state.salons.filter(s=>s.id!==salon.id);log(state,op,'店舗を削除',salon.id,now);return {deleted:salon.id};
+  }
+  // 担当店舗紐付けの変更（仕様書 2.2.4 / AD-005）
+  const memberAction=route.match(/^\/admin\/members\/([^/]+)$/);
+  if(memberAction&&method==='PATCH'){
+    const op=requireOperator(actor,['admin']),profile=state.profiles.find(p=>p.id===memberAction[1]);if(!profile)fail('会員が見つかりません。',404);
+    const salon=salonFor(state,input?.salonId);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
+    profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',profile.id,now);return clone(profile);
   }
   fail('この操作は利用できません。',404);
 }

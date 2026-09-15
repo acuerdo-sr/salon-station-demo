@@ -13,8 +13,19 @@ export function validateMember(input) {
   if (typeof input?.email !== 'string') throw Error('デモ用メールアドレスを入力してください。');
   profile.email = input.email.trim().toLowerCase();
   if (profile.email.length > 150 || !/^[a-z0-9._+-]+@example\.test$/.test(profile.email)) throw Error('デモ用として「salon-a@example.test」のような @example.test のアドレスを使用してください。');
+  // 仕様書 2.6.2 会員マスタの任意項目（フリガナ・電話番号・性別・生年月日）。未入力は空文字で保存する。
+  const optional = { kana: [50, /^[ぁ-んァ-ヶー・\s　]*$/, 'フリガナはかな・カナで50文字以内で入力してください。'], phone: [15, /^[0-9-]*$/, '電話番号は半角数字・ハイフンで15文字以内で入力してください。'], birthday: [10, /^(\d{4}-\d{2}-\d{2})?$/, '生年月日は YYYY-MM-DD 形式で入力してください。'] };
+  for (const [field, [max, pattern, message]] of Object.entries(optional)) {
+    const value = input?.[field] == null ? '' : String(input[field]).trim();
+    if (value.length > max || !pattern.test(value) || (field === 'birthday' && value && Number.isNaN(Date.parse(value)))) throw Error(message);
+    profile[field] = value;
+  }
+  const gender = input?.gender == null ? '' : String(input.gender).trim();
+  if (!['', '1', '2', '9'].includes(gender)) throw Error('性別の指定を確認してください。');
+  profile.gender = gender;
   return profile;
 }
+export const genderNames = { '': '未回答', 1: '男性', 2: '女性', 9: 'その他' };
 
 export function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 12 || password.length > 128) throw Error('デモ用パスワードは12〜128文字で入力してください。');
@@ -28,8 +39,8 @@ export async function passwordDigest(password, salt = hex(crypto.getRandomValues
 
 export function publicMember(member) {
   if (!member) return null;
-  const { id, salon, name, email, createdAt } = member;
-  return { id, salon, name, email, createdAt };
+  const { id, salon, name, email, createdAt, kana = '', phone = '', gender = '', birthday = '' } = member;
+  return { id, salon, name, email, createdAt, kana, phone, gender, birthday };
 }
 
 export function createMemberStore(storage, sessions, key, now = Date.now) {

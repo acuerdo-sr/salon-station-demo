@@ -1,8 +1,10 @@
 export const products = [
- {id:'shampoo-moist',brand:'SENA PROFESSIONAL',name:'モイストリペア シャンプー',category:'シャンプー',size:'500 mL',price:2860,stock:24,image:'shampoo.png',tag:'BEST SELLER',description:'毎日のヘアケアに。しっとりした洗い上がりをイメージした、サロン向けのデモ商品です。',sku:'SN-SH-050'},
- {id:'treatment-repair',brand:'SENA PROFESSIONAL',name:'インテンシブ リペアマスク',category:'トリートメント',size:'250 g',price:3520,stock:18,image:'treatment.png',tag:'NEW',description:'週に一度のスペシャルケアをイメージしたヘアマスク。商品説明・容量・価格はすべて架空です。',sku:'SN-TR-025'},
- {id:'oil-smooth',brand:'SENA BOTANICAL',name:'スムース フィニッシュオイル',category:'ヘアオイル',size:'100 mL',price:2640,stock:30,image:'oil.png',tag:'POPULAR',description:'スタイリングの仕上げに使うヘアオイルをイメージしたデモ商品。自然なまとまりをテーマにしています。',sku:'SN-OL-010'},
- {id:'shampoo-air',brand:'SENA PROFESSIONAL',name:'エアリーケア シャンプー',category:'シャンプー',size:'500 mL',price:2640,stock:12,image:'shampoo.png',tag:'',description:'軽やかな仕上がりをテーマにしたシャンプーのデモ商品です。モイストタイプとの比較もお試しいただけます。',sku:'SN-SH-051'},
- {id:'treatment-daily',brand:'SENA PROFESSIONAL',name:'デイリーケア トリートメント',category:'トリートメント',size:'250 g',price:3080,stock:15,image:'treatment.png',tag:'',description:'デイリーケアをイメージしたトリートメント。毎日のサロンワークに寄り添うデモシリーズです。',sku:'SN-TR-026'},
- {id:'oil-rich',brand:'SENA BOTANICAL',name:'リッチ モイスチャーオイル',category:'ヘアオイル',size:'100 mL',price:3300,stock:0,image:'oil.png',tag:'',description:'しっとりした質感をテーマにしたヘアオイル。売り切れ時の表示を確認するため、初期在庫は0本です。',sku:'SN-OL-011'}
+ {id:'shampoo-moist',brand:'SENA PROFESSIONAL',name:'モイストリペア シャンプー',category:'シャンプー',concerns:['ダメージヘア対策','カラーケア'],size:'500 mL',price:2860,stock:24,image:'shampoo.png',tag:'BEST SELLER',description:'毎日のヘアケアに。しっとりした洗い上がりをイメージした、サロン向けのデモ商品です。',sku:'SN-SH-050'},
+ {id:'treatment-repair',brand:'SENA PROFESSIONAL',name:'インテンシブ リペアマスク',category:'トリートメント',concerns:['ダメージヘア対策','パーマケア','エイジングケア'],size:'250 g',price:3520,stock:18,image:'treatment.png',tag:'NEW',description:'週に一度のスペシャルケアをイメージしたヘアマスク。商品説明・容量・価格はすべて架空です。',sku:'SN-TR-025'},
+ {id:'oil-smooth',brand:'SENA BOTANICAL',name:'スムース フィニッシュオイル',category:'ヘアオイル',concerns:['ダメージヘア対策','カラーケア'],size:'100 mL',price:2640,stock:30,image:'oil.png',tag:'POPULAR',description:'スタイリングの仕上げに使うヘアオイルをイメージしたデモ商品。自然なまとまりをテーマにしています。',sku:'SN-OL-010'},
+ {id:'shampoo-air',brand:'SENA PROFESSIONAL',name:'エアリーケア シャンプー',category:'シャンプー',concerns:['ボリュームアップ','頭皮ケア'],size:'500 mL',price:2640,stock:12,image:'shampoo.png',tag:'',description:'軽やかな仕上がりをテーマにしたシャンプーのデモ商品です。モイストタイプとの比較もお試しいただけます。',sku:'SN-SH-051'},
+ {id:'treatment-daily',brand:'SENA PROFESSIONAL',name:'デイリーケア トリートメント',category:'トリートメント',concerns:['エイジングケア','白髪対策'],size:'250 g',price:3080,stock:15,image:'treatment.png',tag:'',description:'デイリーケアをイメージしたトリートメント。毎日のサロンワークに寄り添うデモシリーズです。',sku:'SN-TR-026'},
+ {id:'oil-rich',brand:'SENA BOTANICAL',name:'リッチ モイスチャーオイル',category:'ヘアオイル',concerns:['エイジングケア','パーマケア'],size:'100 mL',price:3300,stock:0,image:'oil.png',tag:'',description:'しっとりした質感をテーマにしたヘアオイル。売り切れ時の表示を確認するため、初期在庫は0本です。',sku:'SN-OL-011'}
 ];
+// 仕様書 2.2.8「お悩み別検索」の想定カテゴリ。商品の concerns はこの中から設定する。
+export const concernCategories = ['ダメージヘア対策','エイジングケア','白髪対策','ボリュームアップ','頭皮ケア','カラーケア','パーマケア'];
