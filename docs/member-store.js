@@ -39,8 +39,8 @@ export async function passwordDigest(password, salt = hex(crypto.getRandomValues
 
 export function publicMember(member) {
   if (!member) return null;
-  const { id, salon, name, email, createdAt, kana = '', phone = '', gender = '', birthday = '' } = member;
-  return { id, salon, name, email, createdAt, kana, phone, gender, birthday };
+  const { id, salon, name, email, createdAt, kana = '', phone = '', gender = '', birthday = '', lineId = '' } = member;
+  return { id, salon, name, email, createdAt, kana, phone, gender, birthday, lineId };
 }
 
 export function createMemberStore(storage, sessions, key, now = Date.now) {
@@ -91,6 +91,16 @@ export function createMemberStore(storage, sessions, key, now = Date.now) {
         const digest = await passwordDigest(input.password, member?.salt || '00000000000000000000000000000000');
         if (!member || member.hash !== digest.hash) throw Error('メールアドレスまたはパスワードが違います。');
         startSession(member);
+        return { member: publicMember(member) };
+      }
+      if (route === '/auth/line/demo' && method === 'POST') {
+        // 公開デモ専用：LINEログインの体験。LINEとは通信せず、架空のLINE IDで会員を作成する。
+        const lineId = 'Udemo' + crypto.randomUUID().replace(/-/g, '').slice(0, 27);
+        const salon = typeof input?.salon === 'string' && input.salon.trim() ? input.salon.trim().slice(0, 80) : 'LINE登録';
+        const member = { id: crypto.randomUUID(), salon, name: 'LINE デモ会員', email: `line-${lineId.slice(5, 15).toLowerCase()}@example.test`, salt: '', hash: '', kana: '', phone: '', gender: '', birthday: '', lineId, createdAt: new Date(now()).toISOString() };
+        const members = read();
+        sessions.setItem(sessionKey, JSON.stringify({ id: member.id, expiresAt: now() + SESSION_AGE }));
+        try { write([...members, member]); } catch (error) { sessions.removeItem(sessionKey); throw error; }
         return { member: publicMember(member) };
       }
       if (route === '/auth/logout' && method === 'POST') {

@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createPlatform, platformRequest, migrate, demoOperators, DEMO_OPERATOR_PASSWORD } from './dist/platform-core.js';
 import { passwordDigest, SESSION_AGE } from './dist/member-store.js';
 
-export function createPlatformServer(db,catalog,auth){
+export function createPlatformServer(db,catalog,auth,options={}){
   db.exec(`CREATE TABLE IF NOT EXISTS platform_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS operator_sessions (token_hash TEXT PRIMARY KEY, operator_id TEXT NOT NULL, expires_at INTEGER NOT NULL);`);
   if(!db.prepare('SELECT id FROM platform_state WHERE id=1').get())db.prepare('INSERT INTO platform_state VALUES (1,?)').run(JSON.stringify(createPlatform(catalog)));
@@ -30,7 +30,9 @@ export function createPlatformServer(db,catalog,auth){
     try{
       const state=JSON.parse(db.prepare('SELECT payload FROM platform_state WHERE id=1').get().payload);
       const result=platformRequest(state,route,method,input,actor);
-      if(mutates){state.revision++;db.prepare('UPDATE platform_state SET payload=? WHERE id=1').run(JSON.stringify(state));db.exec('COMMIT');}
+      if(mutates){state.revision++;db.prepare('UPDATE platform_state SET payload=? WHERE id=1').run(JSON.stringify(state));db.exec('COMMIT');
+        // 確定後の通知など（LINE通知）。失敗しても応答には影響させない。
+        try{options.onChange?.({route,method,input,result,state});}catch(error){console.error('onChange:',error.message);}}
       return result;
     }catch(error){if(mutates)db.exec('ROLLBACK');throw error;}
   }};

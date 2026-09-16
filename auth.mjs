@@ -4,7 +4,30 @@ import { passwordDigest, validateMember, validatePassword, SESSION_AGE } from '.
 export function createAuth(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, hash TEXT NOT NULL, profile TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id), expires_at INTEGER NOT NULL);`);
+  // 会員マスタの LINE ID（仕様書 2.6.2）。既存DBには列を追加する。
+  if (!db.prepare('PRAGMA table_info(members)').all().some(column => column.name === 'line_id')) db.exec('ALTER TABLE members ADD COLUMN line_id TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS members_line_id ON members(line_id)');
   const tokenHash = token => createHash('sha256').update(token).digest('hex');
+  const parse = row => (row ? JSON.parse(row.profile) : null);
+  const findById = id => parse(db.prepare('SELECT profile FROM members WHERE id=?').get(id));
+  const findByLineId = lineId => parse(db.prepare('SELECT profile FROM members WHERE line_id=?').get(lineId));
+  function linkLine(id, lineId) {
+    const profile = findById(id);
+    if (!profile) throw Error('会員が見つかりません。');
+    profile.lineId = lineId;
+    db.prepare('UPDATE members SET line_id=?, profile=? WHERE id=?').run(lineId, JSON.stringify(profile), id);
+    return profile;
+  }
+  // LINE経由の簡略登録（仕様書 2.2.7 ②）。メールアドレスが既存会員と一致すればそのアカウントに連携する。
+  async function createFromLine({ lineId, name, email }) {
+    const fields = validateMember({ salon: 'LINE登録', name, email });
+    const existing = db.prepare('SELECT id FROM members WHERE email=?').get(fields.email);
+    if (existing) return linkLine(existing.id, lineId);
+    const digest = await passwordDigest(randomBytes(24).toString('hex'));
+    const profile = { id: crypto.randomUUID(), ...fields, lineId, createdAt: new Date().toISOString() };
+    db.prepare('INSERT INTO members (id, email, salt, hash, profile, line_id) VALUES (?, ?, ?, ?, ?, ?)').run(profile.id, profile.email, digest.salt, digest.hash, JSON.stringify(profile), lineId);
+    return profile;
+  }
   const readToken = req => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('salon_session='))?.slice('salon_session='.length) || '';
   const attempts = new Map();
   function member(req) {
@@ -25,7 +48,7 @@ export function createAuth(db) {
     cookie(res, token, Math.floor(SESSION_AGE / 1000));
   }
   return {
-    member,
+    member, findById, findByLineId, linkLine, createFromLine, startSession: session,
     async request(route, method, input, req, res) {
       if (route === '/api/auth/me' && method === 'GET') return { member: member(req) };
       if (route === '/api/auth/register' && method === 'POST') {
@@ -34,7 +57,7 @@ export function createAuth(db) {
         if (db.prepare('SELECT id FROM members WHERE email=?').get(fields.email)) throw Error('このデモ用メールアドレスは登録済みです。');
         const digest = await passwordDigest(input.password);
         const profile = { id: crypto.randomUUID(), ...fields, createdAt: new Date().toISOString() };
-        try { db.prepare('INSERT INTO members VALUES (?, ?, ?, ?, ?)').run(profile.id, profile.email, digest.salt, digest.hash, JSON.stringify(profile)); }
+        try { db.prepare('INSERT INTO members (id, email, salt, hash, profile) VALUES (?, ?, ?, ?, ?)').run(profile.id, profile.email, digest.salt, digest.hash, JSON.stringify(profile)); }
         catch (error) { if (db.prepare('SELECT id FROM members WHERE email=?').get(fields.email)) throw Error('このデモ用メールアドレスは登録済みです。'); throw error; }
         session(req, res, profile);
         return { member: profile };
@@ -66,6 +89,8 @@ export function createAuth(db) {
         const active = member(req);
         if (!active) throw Error('ログインし直してください。');
         const profile = { ...active, ...validateMember({ ...input, email: active.email }) };
+        const stored = findById(active.id);
+        if (stored?.lineId) profile.lineId = stored.lineId;
         db.prepare('UPDATE members SET profile=? WHERE id=?').run(JSON.stringify(profile), profile.id);
         return { member: profile };
       }

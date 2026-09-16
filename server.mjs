@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { products } from './catalog.mjs';
 import { createAuth } from './auth.mjs';
 import { createPlatformServer } from './platform-server.mjs';
+import { createLineAuth, lineConfigFromEnv } from './line.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.DATA_DIR || path.join(root, 'data');
@@ -17,12 +18,24 @@ db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL);`);
 if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'member_id')) db.exec('ALTER TABLE orders ADD COLUMN member_id TEXT');
 const auth = createAuth(db);
-const platformServer = createPlatformServer(db,products,auth);
 const seed = db.prepare('INSERT OR IGNORE INTO products VALUES (?, ?, ?)');
 for (const p of products) seed.run(p.id, p.price, p.stock);
 const catalog = () => products.map(p => ({ ...p, ...db.prepare('SELECT price, stock FROM products WHERE id=?').get(p.id) }));
 const port = Number(process.env.PORT || 4175);
 const origin = `http://127.0.0.1:${port}`;
+// LINE連携（仕様書 2.2.7 / 2.4）。HTTPSトンネル等で外部公開する場合は PUBLIC_ORIGIN / ALLOWED_HOSTS を設定する。
+const lineConfig = lineConfigFromEnv(process.env, origin);
+const line = createLineAuth(auth, lineConfig);
+const extraHosts = (process.env.ALLOWED_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
+const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, new URL(lineConfig.publicOrigin).host, ...extraHosts]);
+const allowedOrigins = new Set([origin, `http://localhost:${port}`, lineConfig.publicOrigin, ...extraHosts.flatMap(h => [`https://${h}`, `http://${h}`])]);
+const csp = `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'${lineConfig.liffId ? ' https://static.line-scdn.net' : ''}; connect-src 'self'${lineConfig.liffId ? ' https://static.line-scdn.net https://liffsdk.line-scdn.net https://api.line.me https://liff.line.me' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`;
+const platformServer = createPlatformServer(db, products, auth, { onChange: ({ route, method, input, result, state }) => {
+ // LINE通知（Messaging API トークン設定時のみ）：注文受付と出荷を LINE連携済みの会員へ送る。
+ const send = (memberId, text) => { const m = memberId && auth.findById(memberId); if (m?.lineId) line.notify(m.lineId, text).catch(error => console.error('LINE notify:', error.message)); };
+ if (route === '/orders' && method === 'POST') send(result.memberId, `【SALON STATION】ご注文を受け付けました。\n注文番号：${result.id}\n合計：¥${Number(result.total).toLocaleString('ja-JP')}\n配送状況は購入履歴からご確認いただけます。`);
+ if (/^\/admin\/purchase-orders\/[^/]+$/.test(route) && method === 'PATCH' && input?.status === 'shipped') { const order = state.orders.find(o => o.id === result.orderId); if (order) send(order.memberId, `【SALON STATION】商品を出荷しました。\n注文番号：${order.id}\n配送：${result.carrier} / 追跡番号 ${result.tracking}`); }
+} });
 function json(res, status, body) { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); }
 function fail(message, status=400) { const e=new Error(message); e.status=status; throw e; }
 async function readBody(req) {
@@ -60,10 +73,28 @@ function customerData(value) {
 const server = http.createServer(async (req, res) => {
  try {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-  if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) return json(res,403,{error:'ローカルホストからアクセスしてください。'});
+  res.setHeader('Content-Security-Policy', csp);
+  if (!allowedHosts.has(req.headers.host)) return json(res,403,{error:'ローカルホストからアクセスしてください。'});
   const url = new URL(req.url, origin);
-  if(!['GET','HEAD'].includes(req.method) && ![origin,`http://localhost:${port}`].includes(req.headers.origin)) return json(res,403,{error:'同じローカルサイトから操作してください。'});
+  if(!['GET','HEAD'].includes(req.method) && !allowedOrigins.has(req.headers.origin)) return json(res,403,{error:'同じローカルサイトから操作してください。'});
+  if (url.pathname === '/api/auth/line/config' && req.method === 'GET') return json(res, 200, line.config);
+  if (url.pathname === '/api/auth/line/start' && req.method === 'GET') {
+   try { res.writeHead(302, { Location: line.start(url.searchParams, auth.member(req)), 'Cache-Control': 'no-store' }); return res.end(); }
+   catch (error) { return json(res, error.status || 400, { error: error.message }); }
+  }
+  if (url.pathname === '/api/auth/line/callback' && req.method === 'GET') {
+   let target;
+   try { const { member, redirect } = await line.callback(url.searchParams); auth.startSession(req, res, member); target = redirect; }
+   catch (error) { console.error('LINE login failed:', error.message); target = line.errorRedirect(error.status ? error.message : 'LINEログインに失敗しました。'); }
+   // 302ではなく同一サイトからの遷移にして、SameSite=Strict のセッションCookieを確実に送る。
+   const safe = target.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Refresh: `0; url=${target}` });
+   return res.end(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>LINEログイン</title></head><body><p>ストアへ移動しています…</p><p><a href="${safe}">移動しない場合はこちら</a></p></body></html>`);
+  }
+  if (url.pathname === '/api/auth/line/liff' && req.method === 'POST') {
+   try { const member = await line.liff(await readBody(req), auth.member(req)); auth.startSession(req, res, member); return json(res, 200, { member }); }
+   catch (error) { return json(res, error.status || 400, { error: error.message }); }
+  }
   if(url.pathname.startsWith('/api/platform/')) {
    try {return json(res,200,await platformServer.request(url.pathname.slice('/api/platform'.length),req.method,req.method==='GET'?undefined:await readBody(req),req,res));}
    catch(error){return json(res,error.status||400,{error:error.message});}

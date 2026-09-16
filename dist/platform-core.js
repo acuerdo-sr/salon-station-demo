@@ -59,7 +59,7 @@ export function migrate(state,catalog){
   let changed=false;
   for(const p of state.products||[]){const src=catalog.find(c=>c.id===p.id);if(!Array.isArray(p.concerns)){p.concerns=[...(src?.concerns||[])];changed=true;}}
   for(const s of state.salons||[]){if(s.prefecture===undefined){const d=seedSalons().find(x=>x.id===s.id)||{};Object.assign(s,{prefecture:d.prefecture||'',city:d.city||'',street:d.street||'',building:d.building||'',phone:d.phone||'',hours:d.hours||'',holiday:d.holiday||'',notes:d.notes||''});changed=true;}}
-  for(const p of state.profiles||[])for(const k of ['kana','phone','gender','birthday'])if(p[k]===undefined){p[k]='';changed=true;}
+  for(const p of state.profiles||[]){for(const k of ['kana','phone','gender','birthday'])if(p[k]===undefined){p[k]='';changed=true;}if(p.lineLinked===undefined){p.lineLinked=false;changed=true;}}
   return changed;
 }
 
@@ -71,7 +71,7 @@ export function createPlatform(catalog,now=new Date().toISOString()){
     const salon=state.salons[i%3],product=state.products[i%5];
     const member={id:'sample-member-'+i,name:['デモ 花子','デモ 美咲','デモ 葵'][i%3],email:`sample-${i}@example.test`};
     const when=new Date(new Date(now).getTime()-i*86400000-3600000).toISOString();
-    state.profiles.push({...member,salonId:salon.id,staffId:salon.staff[0].id,createdAt:when});
+    state.profiles.push({...member,kana:'',phone:'',gender:'',birthday:'',lineLinked:false,salonId:salon.id,staffId:salon.staff[0].id,createdAt:when});
     const order=placeOrder(state,{salonId:salon.id,items:[{id:product.id,quantity:1,price:product.price}],customer:{name:member.name,address:'デモ県サンプル市 1-2-3',postal:'0000000'},requestKey:crypto.randomUUID()},{member},when);
     order.sample=true;order.createdAt=when;
     if(i>0){state.purchaseOrders.filter(p=>p.orderId===order.id).forEach(p=>{p.status=i<3?'accepted':i<5?'shipped':'delivered';if(i>=3){p.tracking='DEMO-'+String(100000+i);p.carrier='デモ配送';p.shippedAt=when;}});refreshOrder(state,order);}
@@ -134,7 +134,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   if(route==='/profile'&&method==='PATCH'){
     if(!actor.member)fail('会員ログインが必要です。',401);const salon=salonFor(state,input?.salonId);if(!salon.enabled)fail('このサロンは現在ご利用いただけません。');
     if(input.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
-    const m=actor.member,previous=currentProfile(state,m),profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
+    const m=actor.member,previous=currentProfile(state,m),profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
     state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',profile.id,now);return clone(profile);
   }
   if(route==='/quote'&&method==='POST'){if(!actor.member)fail('会員ログインが必要です。',401);return cleanQuote(quote(state,input));}

@@ -86,3 +86,5 @@
 .sales-table td.num,.sales-table th.num{text-align:right;white-space:nowrap}.sales-table tr.total td{font-weight:600;background:#f8faf5}
 .salon-address{font-size:11px;color:var(--muted);line-height:1.8;margin:8px 0 12px}
 @media(max-width:650px){.sales-form label{flex:1;min-width:120px}.sales-form input,.sales-form select{min-width:0;width:100%}.page-actions .btn{width:100%;justify-content:center}}
+/* LINE連携 */
+.btn.line{background:#06c755;color:#fff;border:1px solid #06c755}.btn.line:hover{background:#05b34c}.or-divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:10px;margin:2px 0}.or-divider::before,.or-divider::after{content:'';flex:1;height:1px;background:var(--line)}.line-pill{display:inline-block;background:#e3f7ea;color:#118a45;font-size:9px;font-weight:600;padding:1px 6px;border-radius:3px;margin-left:6px;vertical-align:middle}
