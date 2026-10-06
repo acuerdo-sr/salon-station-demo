@@ -2,7 +2,7 @@
 // 入力検証・送料・状態遷移・精算などの規則は platform-core.js の関数を共有する。
 import { randomBytes } from 'node:crypto';
 import {
-  fail, required, int, salonInput, staffList, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
+  fail, required, int, salonInput, staffList, staffNameInput, staffMoveInput, staffRoute, staffStatsOf, newStaffId, MAX_STAFF, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
   settlement, requireOperator, allowedOrder, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
   addressInput, sortAddresses, addressView, cardView, sortCards, shipmentLabel, MAX_ADDRESSES,
@@ -103,7 +103,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
   }
   // 操作履歴・在庫履歴には、お客様の氏名ではなく会員番号を残す
   const actorName = actorLabel;
-  const audit = (q, actor, action, reference, now) => q.run('INSERT INTO audit_logs (occurred_at, actor, action, reference) VALUES (?, ?, ?, ?)', [now, actorName(actor), action, reference]);
+  // 操作の内容は100文字まで（列の長さ）
+  const audit = (q, actor, action, reference, now) => q.run('INSERT INTO audit_logs (occurred_at, actor, action, reference) VALUES (?, ?, ?, ?)', [now, actorName(actor), String(action).slice(0, 100), reference]);
   const event = (q, orderId, label, now) => q.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [orderId, now, label]);
   const memberRow = async (q, id) => openRow(c, 'members', await q.get('SELECT * FROM members WHERE id=?', [id]));
   // 住所録・登録カード
@@ -272,6 +273,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: decodeAddress(o.ship_address).address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
       categories: op.role === 'admin' ? await categoryList(q) : [], concernNames: await concernList(q),
       profiles: members.map(m => ({ ...profileFrom(m), ref: memberRef(m.id) })),
+      staffStats: op.role === 'dealer' ? [] : staffStatsOf((await q.all('SELECT salon_id, staff_id FROM members WHERE salon_id IS NOT NULL')).filter(m => op.role === 'admin' || m.salon_id === op.salonId).map(m => ({ salonId: m.salon_id, staffId: m.staff_id || '' }))),
       customerStats: op.role === 'dealer' ? [] : await customerStats(q, salons, now),
       settlements: views.map(o => settlement(o)),
       events: op.role === 'admin' ? (await q.all('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 400')).map(e => ({ id: String(e.id), at: e.occurred_at, actor: e.actor, action: e.action, reference: e.reference })) : [],
@@ -598,6 +600,44 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       await saveStaff(q, id, staff);
       await audit(q, op, '店舗を登録', id, now);
       return salonById(q, id);
+    }
+    // 担当スタッフの追加・名前の変更・並び替え・削除（ブラウザ版と同じ規則）。削除したスタッフは履歴のため無効にして残す
+    const staffAction = staffRoute(route);
+    if (staffAction && ['POST', 'PATCH', 'DELETE'].includes(method)) {
+      const op = requireOperator(actor, ['admin', 'salon']), salon = await salonById(q, staffAction[1]);
+      if (op.role === 'salon' && op.salonId !== salon.id) fail('他店舗のスタッフは編集できません。', 403);
+      const staffOf = async () => (await salonById(q, salon.id)).staff;
+      if (method === 'POST') {
+        if (staffAction[2]) fail('この操作は利用できません。', 404);
+        if (salon.staff.length >= MAX_STAFF) fail(`スタッフは${MAX_STAFF}名まで登録できます。`, 409);
+        const name = staffNameInput(input?.name, salon.staff), sort = num((await q.get('SELECT MAX(sort_order) AS n FROM staff WHERE salon_id=?', [salon.id]))?.n) + 1;
+        await q.run('INSERT INTO staff (id, salon_id, name, sort_order, active) VALUES (?, ?, ?, ?, 1)', [newStaffId(), salon.id, name, sort]);
+        await audit(q, op, `スタッフを追加（${name}）`, salon.id, now);
+        return staffOf();
+      }
+      const s = salon.staff.find(x => x.id === staffAction[2]); if (!s) fail('スタッフが見つかりません。', 404);
+      if (method === 'PATCH') {
+        if (input?.name !== undefined) {
+          const name = staffNameInput(input.name, salon.staff, s.id);
+          if (name !== s.name) { await q.run('UPDATE staff SET name=? WHERE id=?', [name, s.id]); await audit(q, op, `スタッフ名を変更（${s.name}→${name}）`, salon.id, now); }
+        }
+        if (input?.move !== undefined) {
+          const list = [...salon.staff], i = list.indexOf(s), j = i + staffMoveInput(input.move);
+          if (j >= 0 && j < list.length) {
+            [list[i], list[j]] = [list[j], list[i]];
+            for (const [k, x] of list.entries()) await q.run('UPDATE staff SET sort_order=? WHERE id=?', [k, x.id]);
+            await audit(q, op, 'スタッフの並び順を変更', salon.id, now);
+          }
+        }
+        return staffOf();
+      }
+      const to = input?.transferTo ? salon.staff.find(x => x.id === input.transferTo && x.id !== s.id) : null;
+      if (input?.transferTo && !to) fail('引き継ぎ先のスタッフを確認してください。');
+      const moved = num((await q.get('SELECT COUNT(*) AS n FROM members WHERE salon_id=? AND staff_id=?', [salon.id, s.id]))?.n);
+      await q.run('UPDATE members SET staff_id=?, updated_at=? WHERE salon_id=? AND staff_id=?', [to?.id || null, now, salon.id, s.id]);
+      await q.run('UPDATE staff SET active=0 WHERE id=?', [s.id]);
+      await audit(q, op, `スタッフを削除（${s.name}・担当${moved}人は${to ? to.name : '指名なし'}へ）`, salon.id, now);
+      return staffOf();
     }
     const salonAction = route.match(/^\/admin\/salons\/([^/]+)$/);
     if (salonAction && method === 'PATCH') {

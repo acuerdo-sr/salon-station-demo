@@ -29,6 +29,14 @@ export function salonInput(input){
   if(!/^[0-9-]+$/.test(s.phone))fail('電話番号は半角数字・ハイフンで入力してください。');
   return s;
 }
+// 担当スタッフの管理（美容室は自店、本部は全店舗）。名前は店舗の中で重ならないように、40文字・30名まで
+export const MAX_STAFF=30;
+// スタッフごとの担当のお客様の人数（staffId が空なら指名なし）。お客様一人ひとりの情報は含めない
+export const staffStatsOf=members=>Object.values(members.reduce((a,m)=>{if(!m.salonId)return a;const k=m.salonId+'\n'+(m.staffId||'');(a[k]||=({salonId:m.salonId,staffId:m.staffId||'',members:0})).members++;return a;},{}));
+export const newStaffId=()=>'st-'+crypto.randomUUID().replace(/-/g,'').slice(0,8);
+export function staffNameInput(value,staff,exceptId=''){const name=String(value??'').trim();if(!name||name.length>40)fail('スタッフ名を入力し、40文字以内にしてください。');if(staff.some(s=>s.name===name&&s.id!==exceptId))fail('同じ名前のスタッフが登録されています。',409);return name;}
+export const staffMoveInput=v=>v===-1||v===1?v:fail('並び順を確認してください。');
+export const staffRoute=route=>route.match(/^\/admin\/salons\/([^/]+)\/staff(?:\/([^/]+))?$/);
 export function staffList(value,existing=[]){
   const names=Array.isArray(value)?value:String(value??'').split(/[\n,、，]/);
   const list=[];for(const raw of names){const name=String(raw).trim();if(!name)continue;if(name.length>40)fail('スタッフ名は40文字以内で入力してください。');if(list.some(s=>s.name===name))continue;list.push(existing.find(s=>s.name===name)||{id:'st-'+crypto.randomUUID().slice(0,6),name});}
@@ -282,6 +290,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
       orders:orders.map(o=>orderForRole(op.role,{...customerOrder(state,o,true),fee:o.fee,items:clone(o.items)})),
       purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:customerFor(op.role,clone(o.customer),o.memberId)};}),categories:op.role==='admin'?categoryList(state):[],concernNames:CONCERN_NAMES,
       profiles:clone(members).map(p=>({...p,ref:memberRef(p.id)})),accessLogs:state.accessLogs.filter(row=>accessLogVisible(op,row)).slice(0,ACCESS_LOG_LIMIT).map(row=>accessLogView(op,clone(row))),
+      staffStats:op.role==='dealer'?[]:staffStatsOf(state.profiles.filter(p=>op.role==='admin'||p.salonId===op.salonId)),
       customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
   }
   const poAction=route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
@@ -360,6 +369,23 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const fields={...salonInput(input),owner:required(input?.owner,100),feeRate:int(input?.feeRate??5,0,30),enabled:input?.enabled!==false,staff:staffList(input?.staff)};
     const salon={id:nextSalonId(state),...fields};
     state.salons.push(salon);log(state,op,'店舗を登録',salon.id,now);return clone(salon);
+  }
+  // 担当スタッフの追加・名前の変更・並び替え・削除。削除するスタッフの担当のお客様は transferTo のスタッフ（空なら指名なし）へ引き継ぐ。
+  // 過去の注文には注文時の担当者名が残る
+  const staffAction=staffRoute(route);
+  if(staffAction&&['POST','PATCH','DELETE'].includes(method)){
+    const op=requireOperator(actor,['admin','salon']),salon=salonFor(state,staffAction[1]);
+    if(op.role==='salon'&&op.salonId!==salon.id)fail('他店舗のスタッフは編集できません。',403);
+    if(method==='POST'){if(staffAction[2])fail('この操作は利用できません。',404);if(salon.staff.length>=MAX_STAFF)fail(`スタッフは${MAX_STAFF}名まで登録できます。`,409);const s={id:newStaffId(),name:staffNameInput(input?.name,salon.staff)};salon.staff.push(s);log(state,op,`スタッフを追加（${s.name}）`,salon.id,now);return clone(salon.staff);}
+    const s=salon.staff.find(x=>x.id===staffAction[2]);if(!s)fail('スタッフが見つかりません。',404);
+    if(method==='PATCH'){
+      if(input?.name!==undefined){const name=staffNameInput(input.name,salon.staff,s.id);if(name!==s.name){log(state,op,`スタッフ名を変更（${s.name}→${name}）`,salon.id,now);s.name=name;}}
+      if(input?.move!==undefined){const i=salon.staff.indexOf(s),j=i+staffMoveInput(input.move);if(j>=0&&j<salon.staff.length){[salon.staff[i],salon.staff[j]]=[salon.staff[j],salon.staff[i]];log(state,op,'スタッフの並び順を変更',salon.id,now);}}
+      return clone(salon.staff);
+    }
+    const to=input?.transferTo?salon.staff.find(x=>x.id===input.transferTo&&x.id!==s.id):null;if(input?.transferTo&&!to)fail('引き継ぎ先のスタッフを確認してください。');
+    const moved=state.profiles.filter(p=>p.salonId===salon.id&&p.staffId===s.id);moved.forEach(p=>{p.staffId=to?.id||'';});
+    salon.staff=salon.staff.filter(x=>x!==s);log(state,op,`スタッフを削除（${s.name}・担当${moved.length}人は${to?to.name:'指名なし'}へ）`,salon.id,now);return clone(salon.staff);
   }
   const salonAction=route.match(/^\/admin\/salons\/([^/]+)$/);
   if(salonAction&&method==='PATCH'){
