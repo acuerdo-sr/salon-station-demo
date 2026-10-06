@@ -26,7 +26,9 @@ function staffList(value,existing=[]){
   if(list.length>30)fail('スタッフは30名以内で登録してください。');
   return list;
 }
-function nextSalonId(state){let n=state.salons.length+1,id;do{id='S'+String(n++).padStart(3,'0');}while(state.salons.some(s=>s.id===id));return id;}
+// 店舗IDは削除後も再利用しない（印刷済みQRが別店舗を指さないよう、採番済みの最大値を保持する）。
+const salonSeqFrom=salons=>Math.max(salons.length,...salons.map(s=>/^S(\d+)$/.exec(s.id)?.[1]).filter(Boolean).map(Number));
+function nextSalonId(state){let n=Math.max(state.salonSeq??0,salonSeqFrom(state.salons))+1,id;while(state.salons.some(s=>s.id===(id='S'+String(n).padStart(3,'0'))))n++;state.salonSeq=n;return id;}
 const jst=iso=>new Date(new Date(iso).getTime()+9*3600000).toISOString();
 // 販売実績集計（仕様書 2.2.5）：期間（日次・月次・年次・任意）× 店舗別／全店舗で 販売金額（税込・送料除く）・受注件数・顧客数を集計する。
 export const salesUnits={day:'日次',month:'月次',year:'年次',range:'任意期間'};
@@ -60,12 +62,13 @@ export function migrate(state,catalog){
   for(const p of state.products||[]){const src=catalog.find(c=>c.id===p.id);if(!Array.isArray(p.concerns)){p.concerns=[...(src?.concerns||[])];changed=true;}}
   for(const s of state.salons||[]){if(s.prefecture===undefined){const d=seedSalons().find(x=>x.id===s.id)||{};Object.assign(s,{prefecture:d.prefecture||'',city:d.city||'',street:d.street||'',building:d.building||'',phone:d.phone||'',hours:d.hours||'',holiday:d.holiday||'',notes:d.notes||''});changed=true;}}
   for(const p of state.profiles||[]){for(const k of ['kana','phone','gender','birthday'])if(p[k]===undefined){p[k]='';changed=true;}if(p.lineLinked===undefined){p.lineLinked=false;changed=true;}}
+  if(state.salonSeq===undefined&&Array.isArray(state.salons)){state.salonSeq=salonSeqFrom(state.salons);changed=true;}
   return changed;
 }
 
 export function createPlatform(catalog,now=new Date().toISOString()){
   const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
-    salons:seedSalons(),dealers:[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}],profiles:[],orders:[],purchaseOrders:[],events:[]};
+    salonSeq:3,salons:seedSalons(),dealers:[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}],profiles:[],orders:[],purchaseOrders:[],events:[]};
   // Clearly fictional examples make the management screens useful on first visit.
   for(let i=0;i<8;i++){
     const salon=state.salons[i%3],product=state.products[i%5];
@@ -95,7 +98,7 @@ function quote(state,input){
 }
 function cleanQuote(value){return {...value,items:value.items.map(({cost,...p})=>p)};}
 function currentProfile(state,member){return member&&state.profiles.find(p=>p.id===member.id);}
-function placeOrder(state,input,actor,now){
+function placeOrder(state,input,actor,now,effects=[]){
   const member=actor.member;if(!member)fail('会員ログインが必要です。',401);
   const key=required(input?.requestKey,80);if(!/^[a-f0-9-]{36}$/i.test(key))fail('注文番号の形式が正しくありません。');
   const fingerprint=JSON.stringify({salonId:input.salonId,items:input.items,customer:input.customer});
@@ -111,7 +114,7 @@ function placeOrder(state,input,actor,now){
   const groups=[...new Set(q.items.map(p=>p.dealerId))];
   groups.forEach((dealerId,index)=>{const items=q.items.filter(p=>p.dealerId===dealerId);state.purchaseOrders.unshift({id:'PO-'+id.slice(3)+'-'+(index+1),orderId:id,dealerId,salonId:salon.id,createdAt:now,status:'pending',items:clone(items),shipping:index===0?q.shipping:0,total:items.reduce((s,p)=>s+p.cost*p.quantity,0)+(index===0?q.shipping:0),tracking:'',carrier:''});});
   q.items.forEach(line=>{state.products.find(p=>p.id===line.id).stock-=line.quantity;});
-  log(state,member,'受注・仕入先への自動発注',id,now);return order;
+  log(state,member,'受注・仕入先への自動発注',id,now);effects.push({type:'order_placed',orderId:id,memberId:member.id});return order;
 }
 function refreshOrder(state,order){
   if(['cancelled','returned','return_requested'].includes(order.status))return;
@@ -127,19 +130,24 @@ function allowedOrder(actor,order){const op=actor.operator;return op&&(op.role==
 function restore(state,order){if(order.stockRestored)return;order.items.forEach(p=>{state.products.find(item=>item.id===p.id).stock+=p.quantity;});order.stockRestored=true;}
 function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.cost*p.quantity,0),voided=['cancelled','returned'].includes(order.status);return {orderId:order.id,salonId:order.salonId,salonName:order.salonName,at:order.createdAt,status:order.status,sales:voided?0:order.subtotal,purchase:voided?0:purchase,fee:voided?0:order.fee,proceeds:voided?0:order.subtotal-purchase-order.fee,refunded:voided?order.total:0,pending:order.status==='return_requested'};}
 
-export function platformRequest(state,route,method='GET',input,actor={},now=new Date().toISOString()){
+// effects には、実際に状態が変わったときだけ通知などの副作用の種類を積む（再送・同一状態への更新では積まない）。
+export function platformRequest(state,route,method='GET',input,actor={},now=new Date().toISOString(),effects=[]){
   // クローズドサイト（仕様書 2.2.6）：未ログインには商品・価格を返さない。サロン一覧は会員登録時の選択用に返す。
   if(route==='/bootstrap'&&method==='GET')return {closed:true,products:actor.member||actor.operator?safeProducts(state):[],salons:clone(state.salons.filter(s=>s.enabled)).map(({feeRate,notes,...s})=>s),dealers:clone(state.dealers),revision:state.revision};
-  if(route==='/profile'&&method==='GET')return clone(currentProfile(state,actor.member)||null);
+  if(route==='/profile'&&method==='GET'){const p=currentProfile(state,actor.member);if(!p)return null;const s=state.salons.find(x=>x.id===p.salonId);return {...clone(p),salonName:s?.name||'',salonEnabled:Boolean(s?.enabled)};}
   if(route==='/profile'&&method==='PATCH'){
-    if(!actor.member)fail('会員ログインが必要です。',401);const salon=salonFor(state,input?.salonId);if(!salon.enabled)fail('このサロンは現在ご利用いただけません。');
+    if(!actor.member)fail('会員ログインが必要です。',401);const salon=salonFor(state,input?.salonId);
+    const m=actor.member,previous=currentProfile(state,m);
+    // 担当店舗は初回の紐付け（QR・会員登録）で決まり、以後の変更は本部の「担当店舗の紐付け変更」で行う（仕様書 2.2.4）。
+    if(previous&&previous.salonId!==salon.id)fail('担当サロンの変更は、ご利用のサロンまたは運営本部にご依頼ください。',403);
+    if(!previous&&!salon.enabled)fail('このサロンは現在ご利用いただけません。');
     if(input.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
-    const m=actor.member,previous=currentProfile(state,m),profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
+    const profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
     state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',profile.id,now);return clone(profile);
   }
   if(route==='/quote'&&method==='POST'){if(!actor.member)fail('会員ログインが必要です。',401);return cleanQuote(quote(state,input));}
   if(route==='/admin/sales'&&method==='POST')return salesReport(state,input,actor,now);
-  if(route==='/orders'&&method==='POST')return customerOrder(state,placeOrder(state,input,actor,now));
+  if(route==='/orders'&&method==='POST')return customerOrder(state,placeOrder(state,input,actor,now,effects));
   if(route==='/orders'&&method==='GET'){if(!actor.member)fail('会員ログインが必要です。',401);return state.orders.filter(o=>o.memberId===actor.member.id).map(o=>customerOrder(state,o));}
   const customerAction=route.match(/^\/orders\/([^/]+)\/(cancel|return)$/);
   if(customerAction&&method==='POST'){
@@ -175,7 +183,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(input?.status===po.status)return clone(po);
     if(transitions[po.status]!==input?.status)fail('受付 → 出荷 → 配達完了の順に操作してください。',409);
     if(input.status==='shipped'){const tracking=required(input.tracking,60);if(!/^[A-Za-z0-9-]+$/.test(tracking))fail('追跡番号は半角英数字・ハイフンで入力してください。');const carrier=required(input.carrier,40);po.tracking=tracking;po.carrier=carrier;po.shippedAt=now;}
-    po.status=input.status;refreshOrder(state,order);order.timeline.push({at:now,label:`${state.dealers.find(d=>d.id===po.dealerId).short}：${poStatuses[po.status]}`});log(state,op,poStatuses[po.status],po.id,now);return clone(po);
+    po.status=input.status;if(po.status==='shipped')effects.push({type:'shipped',purchaseOrderId:po.id,orderId:order.id,memberId:order.memberId});refreshOrder(state,order);order.timeline.push({at:now,label:`${state.dealers.find(d=>d.id===po.dealerId).short}：${poStatuses[po.status]}`});log(state,op,poStatuses[po.status],po.id,now);return clone(po);
   }
   const returnAction=route.match(/^\/admin\/orders\/([^/]+)\/refund$/);
   if(returnAction&&method==='POST'){
@@ -214,7 +222,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   const memberAction=route.match(/^\/admin\/members\/([^/]+)$/);
   if(memberAction&&method==='PATCH'){
     const op=requireOperator(actor,['admin']),profile=state.profiles.find(p=>p.id===memberAction[1]);if(!profile)fail('会員が見つかりません。',404);
-    const salon=salonFor(state,input?.salonId);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
+    const salon=salonFor(state,input?.salonId);if(!salon.enabled&&salon.id!==profile.salonId)fail('受付を停止しているサロンには紐付けできません。',409);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
     profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',profile.id,now);return clone(profile);
   }
   fail('この操作は利用できません。',404);

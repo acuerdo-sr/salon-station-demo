@@ -1,6 +1,6 @@
 // LINE連携（仕様書 2.2.7 ② / 2.4）：LINEログイン（OAuth 2.0 + OpenID Connect）、LIFF（LINEミニアプリ）、
 // Messaging API による注文・出荷通知。チャネル情報は環境変数から受け取り、未設定なら機能を閉じる。
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export function lineConfigFromEnv(env = process.env, origin) {
   const channelId = env.LINE_CHANNEL_ID || '', channelSecret = env.LINE_CHANNEL_SECRET || '';
@@ -18,12 +18,23 @@ export function lineConfigFromEnv(env = process.env, origin) {
   };
 }
 
+// LINEログインの失敗理由。利用者に返すのはこのコードだけにし、画面の文言はクライアント側で固定する。
+export const LINE_ERROR_CODES = ['cancelled', 'expired', 'conflict', 'failed'];
+export const LINE_STATE_COOKIE = 'salon_line_state';
+const STATE_AGE = 10 * 60 * 1000;
+const MAX_STATES = 5000;
+
 export function createLineAuth(auth, config, options = {}) {
   const states = new Map(); // state → { nonce, salonId, staffId, memberId, createdAt }
-  const STATE_AGE = 10 * 60 * 1000;
   const fetchImpl = options.fetch || fetch;
-  function fail(message, status = 400) { const error = new Error(message); error.status = status; throw error; }
-  function cleanup() { const now = Date.now(); for (const [key, value] of states) if (now - value.createdAt > STATE_AGE) states.delete(key); }
+  function fail(message, status = 400, code = 'failed') { const error = new Error(message); error.status = status; error.code = code; throw error; }
+  function cleanup() {
+    const now = Date.now();
+    for (const [key, value] of states) if (now - value.createdAt > STATE_AGE) states.delete(key);
+    // 未認証で呼べる開始URLを連打されてもメモリが増え続けないよう、古いものから捨てる。
+    while (states.size >= MAX_STATES) states.delete(states.keys().next().value);
+  }
+  const sameState = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && a.length > 0 && timingSafeEqual(Buffer.from(a), Buffer.from(b));
   async function post(url, form, headers = {}) {
     const response = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers }, body: new URLSearchParams(form) });
     const body = await response.json().catch(() => ({}));
@@ -41,12 +52,13 @@ export function createLineAuth(auth, config, options = {}) {
   async function resolveMember(payload, currentMember) {
     const existing = auth.findByLineId(payload.sub);
     if (currentMember) {
-      if (existing && existing.id !== currentMember.id) fail('このLINEアカウントは別の会員に連携済みです。', 409);
+      if (existing && existing.id !== currentMember.id) fail('このLINEアカウントは別の会員に連携済みです。', 409, 'conflict');
       return existing || auth.linkLine(currentMember.id, payload.sub);
     }
     if (existing) return existing;
     const email = String(payload.email || '').trim().toLowerCase();
-    return auth.createFromLine({ lineId: payload.sub, name: String(payload.name || 'LINE会員').slice(0, 80), email: /@example\.test$/.test(email) ? email : demoEmail(payload.sub) });
+    const name = String(payload.name || '').trim().slice(0, 80) || 'LINE会員';
+    return auth.createFromLine({ lineId: payload.sub, name, email: /@example\.test$/.test(email) ? email : demoEmail(payload.sub) });
   }
   function frontUrl(params) {
     const url = new URL('/', config.publicOrigin);
@@ -57,6 +69,7 @@ export function createLineAuth(auth, config, options = {}) {
   return {
     config: { enabled: config.enabled, liffId: config.liffId, notifications: Boolean(config.messagingToken) },
     // LINEログイン開始：state と nonce を発行し、LINEの認可画面へ送る。QRの店舗・スタッフは state 側に保持する。
+    // state は開始したブラウザの Cookie にも保存し、コールバックで照合する（ログインCSRF・連携の乗っ取り対策）。
     start(query, currentMember) {
       if (!config.enabled) fail('LINEログインは未設定です。README の「LINE連携の設定」を参照してください。', 404);
       cleanup();
@@ -64,14 +77,15 @@ export function createLineAuth(auth, config, options = {}) {
       states.set(state, { nonce, salonId: String(query.get('salon') || '').slice(0, 20), staffId: String(query.get('staff') || '').slice(0, 20), memberId: currentMember?.id || '', createdAt: Date.now() });
       const url = new URL('/oauth2/v2.1/authorize', config.authBase);
       url.search = new URLSearchParams({ response_type: 'code', client_id: config.channelId, redirect_uri: config.callbackUrl, state, scope: config.scope, nonce }).toString();
-      return url.href;
+      return { url: url.href, state };
     },
-    async callback(query) {
+    async callback(query, browserState) {
       if (!config.enabled) fail('LINEログインは未設定です。', 404);
       cleanup();
-      if (query.get('error')) fail(query.get('error_description') || 'LINEログインがキャンセルされました。', 401);
-      const state = query.get('state') || '', saved = states.get(state);
-      if (!saved) fail('ログインの有効期限が切れました。もう一度お試しください。', 400);
+      const state = query.get('state') || '';
+      if (query.get('error')) { states.delete(state); fail(query.get('error_description') || 'LINEログインがキャンセルされました。', 401, 'cancelled'); }
+      const saved = states.get(state);
+      if (!saved || !sameState(state, browserState)) fail('ログインの有効期限が切れました。もう一度お試しください。', 400, 'expired');
       states.delete(state);
       const code = query.get('code');
       if (!code) fail('LINEから認証コードを受け取れませんでした。');
@@ -96,6 +110,7 @@ export function createLineAuth(auth, config, options = {}) {
       if (!response.ok) throw Error('LINE通知の送信に失敗しました: HTTP ' + response.status);
       return true;
     },
-    errorRedirect(message) { return frontUrl({ line: 'error', message: String(message).slice(0, 200) }); },
+    errorRedirect(code) { return frontUrl({ line: 'error', reason: LINE_ERROR_CODES.includes(code) ? code : 'failed' }); },
+    pendingStates: () => states.size,
   };
 }
