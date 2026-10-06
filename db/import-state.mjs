@@ -3,6 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { jst, includedTax } from '../dist/platform-core.js';
 import { wholesaleOf, salonAddress } from '../dist/supply-core.js';
+import { createFieldCrypto } from './crypto.mjs';
 
 // カテゴリ・お悩みの ID（表示名は日本語、ID は英字で固定）
 const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil' };
@@ -12,7 +13,9 @@ const at = (base, offsetMs) => new Date(Date.parse(base) + offsetMs).toISOString
 // パスワードを持たない会員（サンプル・移行時に元データがない会員）は、照合できない乱数を入れておく。
 const unusablePassword = () => ({ salt: randomBytes(16).toString('hex'), hash: randomBytes(32).toString('hex') });
 
-export async function importState(tx, state, { catalog, concernNames = [], legacyMembers = [], legacySessions = [], now = new Date().toISOString() }) {
+// fieldCrypto：会員の個人情報と注文のお届け先は暗号化して入れる（db/crypto.mjs）
+export async function importState(tx, state, { catalog, concernNames = [], legacyMembers = [], legacySessions = [], now = new Date().toISOString(), fieldCrypto = createFieldCrypto(null) }) {
+  const c = fieldCrypto;
   const products = state.products || [];
   // 仕入先
   for (const d of state.dealers || []) await tx.run('INSERT INTO dealers (id, name, short_name, area, lead_time) VALUES (?, ?, ?, ?, ?)', [d.id, d.name, d.short || d.name, d.area || '', d.lead || '']);
@@ -63,9 +66,9 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
     usedEmails.add(email);
     const p = profiles.get(m.id), salonId = p && salonIds.has(p.salonId) ? p.salonId : null;
     const staffId = salonId && p.staffId && staffIds.has(p.staffId) ? p.staffId : null;
-    await tx.run(`INSERT INTO members (id, email, password_salt, password_hash, name, kana, phone, gender, birthday, line_id, salon_id, staff_id, salon_linked_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [m.id, email, m.salt, m.hash, m.name, m.kana, m.phone, m.gender, m.birthday, m.lineId, salonId, staffId, salonId ? (p.createdAt || m.createdAt) : null, m.createdAt, now]);
+    await tx.run(`INSERT INTO members (id, email, email_index, password_salt, password_hash, name, kana, phone, gender, birthday, line_id, salon_id, staff_id, salon_linked_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [m.id, c.encrypt(email), c.blindIndex(email), m.salt, m.hash, ...[m.name, m.kana, m.phone, m.gender, m.birthday].map(c.encrypt), m.lineId, salonId, staffId, salonId ? (p.createdAt || m.createdAt) : null, m.createdAt, now]);
   }
   for (const s of legacySessions) if (members.has(s.member_id)) await tx.run('INSERT INTO member_sessions (token_hash, member_id, expires_at) VALUES (?, ?, ?)', [s.token_hash, s.member_id, s.expires_at]);
   // 注文・発注・明細・履歴・決済（古いものから）
@@ -75,8 +78,8 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
     await tx.run(`INSERT INTO orders (id, request_key, fingerprint, member_id, salon_id, salon_name, seller, staff_id, staff_name, fee_rate, fee, subtotal, shipping, total, tax_total,
       status, payment_status, ship_name, ship_postal, ship_address, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [o.id, o.requestKey || `legacy-${o.id}`, o.fingerprint || '', o.memberId, o.salonId, o.salonName, o.seller || o.salonName, o.staffId || '', o.staffName || '指名なし', o.feeRate ?? 0, o.fee ?? 0, o.subtotal, o.shipping, o.total, includedTax(o.total),
-      o.status, refunded ? 'refunded' : 'captured', o.customer?.name || '', o.customer?.postal || '', o.customer?.address || '', o.customer?.email || '', o.returnReason || null, o.stockRestored ? 1 : 0, o.sample ? 1 : 0,
+    [o.id, o.requestKey || `legacy-${o.id}`, c.digest(o.fingerprint || ''), o.memberId, o.salonId, o.salonName, o.seller || o.salonName, o.staffId || '', o.staffName || '指名なし', o.feeRate ?? 0, o.fee ?? 0, o.subtotal, o.shipping, o.total, includedTax(o.total),
+      o.status, refunded ? 'refunded' : 'captured', ...[o.customer?.name, o.customer?.postal, o.customer?.address, o.customer?.email].map(v => c.encrypt(v || '')), o.returnReason ? c.encrypt(o.returnReason) : null, o.stockRestored ? 1 : 0, o.sample ? 1 : 0,
       jst(o.createdAt).slice(0, 10), o.createdAt, now]);
     const pos = (state.purchaseOrders || []).filter(p => p.orderId === o.id).sort((a, b) => a.id.localeCompare(b.id));
     for (const [i, po] of pos.entries()) {
@@ -92,7 +95,7 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
     }
     for (const e of o.timeline || []) await tx.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [o.id, e.at, e.label]);
     await tx.run("INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, created_at, updated_at) VALUES (?, 'test', ?, ?, ?, ?, ?)", [o.id, `test_${o.id}`, o.total, refunded ? 'refunded' : 'captured', o.createdAt, now]);
-    if (refunded) await tx.run('INSERT INTO refunds (order_id, amount, reason, created_at) VALUES (?, ?, ?, ?)', [o.id, o.total, o.returnReason || 'キャンセル', now]);
+    if (refunded) await tx.run('INSERT INTO refunds (order_id, amount, reason, created_at) VALUES (?, ?, ?, ?)', [o.id, o.total, o.returnReason ? '返品' : 'キャンセル', now]);
   }
   // 操作履歴（古いものから）
   for (const e of [...(state.events || [])].sort((a, b) => a.at.localeCompare(b.at))) await tx.run('INSERT INTO audit_logs (occurred_at, actor, action, reference) VALUES (?, ?, ?, ?)', [e.at, e.actor || '', e.action, e.reference || '']);

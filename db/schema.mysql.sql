@@ -40,13 +40,14 @@ CREATE TABLE IF NOT EXISTS product_concerns (
   FOREIGN KEY (product_id) REFERENCES products(id), FOREIGN KEY (concern_id) REFERENCES concerns(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 会員。メール・氏名・フリガナ・電話・性別・生年月日は暗号化した値（enc:v1:…）を保存するため列を広く取る。検索は email_index。
 CREATE TABLE IF NOT EXISTS members (
-  id VARCHAR(40) PRIMARY KEY, email VARCHAR(150) NOT NULL UNIQUE, password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL,
-  name VARCHAR(80) NOT NULL, kana VARCHAR(50) NOT NULL DEFAULT '', phone VARCHAR(15) NOT NULL DEFAULT '', gender VARCHAR(1) NOT NULL DEFAULT '', birthday VARCHAR(10) NOT NULL DEFAULT '',
+  id VARCHAR(40) PRIMARY KEY, email VARCHAR(512) NOT NULL, email_index VARCHAR(64) NULL, password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL,
+  name VARCHAR(512) NOT NULL, kana VARCHAR(512) NOT NULL DEFAULT '', phone VARCHAR(128) NOT NULL DEFAULT '', gender VARCHAR(128) NOT NULL DEFAULT '', birthday VARCHAR(128) NOT NULL DEFAULT '',
   line_id VARCHAR(100) NULL UNIQUE, salon_id VARCHAR(20) NULL, staff_id VARCHAR(40) NULL, salon_linked_at VARCHAR(30) NULL,
   privacy_version VARCHAR(20) NULL, privacy_agreed_at VARCHAR(30) NULL,
   created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
-  KEY members_salon (salon_id), FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (staff_id) REFERENCES staff(id)
+  UNIQUE KEY members_email_index (email_index), KEY members_salon (salon_id), FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (staff_id) REFERENCES staff(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS member_sessions (
   token_hash CHAR(64) PRIMARY KEY, member_id VARCHAR(40) NOT NULL, expires_at BIGINT NOT NULL,
@@ -54,7 +55,7 @@ CREATE TABLE IF NOT EXISTS member_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS member_addresses (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, member_id VARCHAR(40) NOT NULL,
-  name VARCHAR(80) NOT NULL, postal VARCHAR(8) NOT NULL, address VARCHAR(250) NOT NULL, is_default TINYINT(1) NOT NULL DEFAULT 1, updated_at VARCHAR(30) NOT NULL,
+  name VARCHAR(512) NOT NULL, postal VARCHAR(128) NOT NULL, address VARCHAR(1500) NOT NULL, is_default TINYINT(1) NOT NULL DEFAULT 1, updated_at VARCHAR(30) NOT NULL,
   KEY member_addresses_member (member_id, is_default), FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -86,8 +87,8 @@ CREATE TABLE IF NOT EXISTS orders (
   salon_name VARCHAR(100) NOT NULL, seller VARCHAR(100) NOT NULL, staff_id VARCHAR(40) NOT NULL DEFAULT '', staff_name VARCHAR(40) NOT NULL,
   fee_rate INT NOT NULL, fee INT NOT NULL, subtotal INT NOT NULL, shipping INT NOT NULL, total INT NOT NULL, tax_total INT NOT NULL,
   status VARCHAR(20) NOT NULL, payment_status VARCHAR(20) NOT NULL,
-  ship_name VARCHAR(80) NOT NULL, ship_postal VARCHAR(8) NOT NULL, ship_address VARCHAR(250) NOT NULL, ship_email VARCHAR(150) NOT NULL,
-  return_reason VARCHAR(300) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, is_sample TINYINT(1) NOT NULL DEFAULT 0,
+  ship_name VARCHAR(512) NOT NULL, ship_postal VARCHAR(128) NOT NULL, ship_address VARCHAR(1500) NOT NULL, ship_email VARCHAR(512) NOT NULL,
+  return_reason VARCHAR(1700) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, is_sample TINYINT(1) NOT NULL DEFAULT 0,
   ordered_on CHAR(10) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY orders_salon_date (salon_id, ordered_on), KEY orders_member (member_id, created_at), KEY orders_created (created_at),
   CONSTRAINT orders_status CHECK (status IN ('ordered','processing','partially_shipped','shipped','delivered','cancelled','return_requested','returned')),
@@ -133,6 +134,16 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS audit_logs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, occurred_at VARCHAR(30) NOT NULL, actor VARCHAR(80) NOT NULL, action VARCHAR(100) NOT NULL, reference VARCHAR(60) NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+-- お客様の個人情報へのアクセス記録（値そのものは記録しない）。役割・操作・対象・経路は日本語で保存する。
+-- 追記のみ：アプリ用ユーザーには追加と参照の権限だけを与える（db/grants.mysql.sql）。
+CREATE TABLE IF NOT EXISTS data_access_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, occurred_at VARCHAR(30) NOT NULL,
+  actor_id VARCHAR(80) NOT NULL, actor_name VARCHAR(80) NOT NULL, role VARCHAR(20) NOT NULL,
+  salon_id VARCHAR(20) NOT NULL DEFAULT '', action VARCHAR(20) NOT NULL, target VARCHAR(40) NOT NULL,
+  record_count INT NOT NULL DEFAULT 0, member_refs VARCHAR(200) NOT NULL DEFAULT '', purpose VARCHAR(200) NOT NULL DEFAULT '',
+  channel VARCHAR(20) NOT NULL, ip VARCHAR(60) NOT NULL DEFAULT '',
+  KEY data_access_logs_salon (salon_id, id), KEY data_access_logs_actor (actor_id, action, target, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, member_id VARCHAR(40) NOT NULL, channel VARCHAR(20) NOT NULL, kind VARCHAR(40) NOT NULL, reference VARCHAR(60) NOT NULL,

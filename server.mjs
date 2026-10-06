@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { products, concernCategories } from './catalog.mjs';
 import { openDatabase } from './db/adapter.mjs';
+import { loadDataKey, createFieldCrypto } from './db/crypto.mjs';
 import { createAuth } from './auth.mjs';
 import { createPlatformServer } from './platform-server.mjs';
 import { createLineAuth, lineConfigFromEnv, LINE_STATE_COOKIE } from './line.mjs';
@@ -13,12 +14,15 @@ const dataDir = process.env.DATA_DIR || path.join(root, 'data');
 mkdirSync(dataDir, { recursive: true });
 // DATABASE_URL=mysql://… なら MySQL 8.0、未設定なら data/shop.sqlite（SQLite）。テーブル定義は db/schema.*.sql。
 const db = await openDatabase({ sqliteFile: path.join(dataDir, 'shop.sqlite') });
+// お客様の個人情報はアプリで暗号化してDBに保存する。鍵は DATA_ENCRYPTION_KEY（未設定のローカル版は data/encryption.key）。
+const dataKey = loadDataKey({ dataDir });
+const fieldCrypto = createFieldCrypto(dataKey.key);
 const port = Number(process.env.PORT || 4175);
 const origin = `http://127.0.0.1:${port}`;
 // LINE連携（仕様書 2.2.7 / 2.4）。HTTPSトンネル等で外部公開する場合は PUBLIC_ORIGIN / ALLOWED_HOSTS / TRUST_PROXY を設定する。
 const lineConfig = lineConfigFromEnv(process.env, origin);
 const secure = lineConfig.publicOrigin.startsWith('https://');
-const auth = createAuth(db, { secure });
+const auth = createAuth(db, { secure, fieldCrypto });
 const line = createLineAuth(auth, lineConfig);
 const extraHosts = (process.env.ALLOWED_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, new URL(lineConfig.publicOrigin).host, ...extraHosts]);
@@ -59,7 +63,9 @@ async function onChange({ effects, store }) {
   }
  }
 }
-const platformServer = await createPlatformServer(db, products, auth, { secure, concernNames: concernCategories, onChange, verifyLineToken: idToken => line.verify(idToken) });
+const platformServer = await createPlatformServer(db, products, auth, { secure, concernNames: concernCategories, onChange, fieldCrypto, verifyLineToken: idToken => line.verify(idToken) });
+if (dataKey.source !== 'env') console.log(`個人情報の暗号鍵：${dataKey.source}（本番では DATA_ENCRYPTION_KEY を設定し、DBとは別の場所に保管してください）`);
+if (db.dialect === 'sqlite' && await db.tableExists('legacy_members')) console.warn('旧形式の表（legacy_*）に暗号化前の個人情報が残っています。移行を確認したら削除してください（README「DBへのアクセス」）。');
 // 期日を迎えた定期発注を起動時と10分ごとに作成する
 async function runDueSubscriptions() {
  try { const effects = [], result = await platformServer.store.runDueSubscriptions(new Date().toISOString(), effects); if (result.created.length || result.failed.length) console.log(`定期発注：作成${result.created.length}件・失敗${result.failed.length}件`); if (effects.length) await onChange({ effects, store: platformServer.store }); }

@@ -11,6 +11,8 @@ import { importState } from './import-state.mjs';
 import { createSupplyStore } from './supply-store.mjs';
 import { wholesaleOf } from '../dist/supply-core.js';
 import { memberRef, actorLabel, customerFor, orderForRole } from '../dist/privacy.js';
+import { viewEntries, shouldRecordView, exportInput, lookupInput, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from '../dist/access-log.js';
+import { createFieldCrypto, openRow, sealRow, isSealed, SEALED_COLUMNS } from './crypto.mjs';
 
 const bool = value => Boolean(Number(value));
 const num = value => Number(value || 0);
@@ -18,10 +20,17 @@ const marks = list => list.map(() => '?').join(',');
 const paymentLabels = { captured: 'テスト決済完了', refunded: 'テスト返金完了' };
 // 変更を伴わない処理と、全画面の再読み込みを促さない処理（カート・お気に入り）
 const READ_ONLY = new Set(['/quote', '/admin/sales']);
-const QUIET = new Set(['/cart', '/favorites']);
+const QUIET = new Set(['/cart', '/favorites', '/admin/exports']);
 const SNAPSHOT_LIMIT = 1000;
+export const SCHEMA_VERSION = '4';
+const KEY_CHECK = 'salon-station:key-check';
+// アクセス記録は追記のみ（SQLite）。MySQL ではアプリ用ユーザーに UPDATE / DELETE の権限を与えない（db/grants.mysql.sql）。
+const APPEND_ONLY_SQLITE = `CREATE TRIGGER IF NOT EXISTS data_access_logs_no_update BEFORE UPDATE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は変更できません'); END;
+CREATE TRIGGER IF NOT EXISTS data_access_logs_no_delete BEFORE DELETE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は削除できません'); END;`;
 
-export function createPlatformStore(db, { catalog, concernNames = [] }) {
+// fieldCrypto：お客様の個人情報（会員・お届け先・注文のお届け先）を暗号化して保存する（db/crypto.mjs）。
+export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypto }) {
+  const c = fieldCrypto || createFieldCrypto(null);
   // ---- 読み出し（行 → 画面に渡す形）
   const salonFrom = (r, staff) => ({ id: r.id, name: r.name, area: r.area, description: r.description, owner: r.owner, prefecture: r.prefecture, city: r.city, street: r.street, building: r.building, phone: r.phone, hours: r.hours, holiday: r.holiday, notes: r.notes, feeRate: num(r.fee_rate), enabled: bool(r.enabled), staff });
   async function loadSalons(q, { enabledOnly = false, ids } = {}) {
@@ -61,7 +70,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   }
   const itemFrom = (i, withCost) => ({ id: i.product_id, name: i.name, image: i.image, size: i.size, price: num(i.unit_price), ...(withCost ? { cost: num(i.unit_cost) } : {}), quantity: num(i.quantity), dealerId: i.dealer_id });
   function orderView(o, dealers, admin = false) {
-    const r = o.row;
+    const r = openRow(c, 'orders', o.row);
     const view = {
       id: r.id, createdAt: r.created_at, memberId: r.member_id, salonId: r.salon_id, salonName: r.salon_name, seller: r.seller, staffId: r.staff_id, staffName: r.staff_name,
       customer: { name: r.ship_name, address: r.ship_address, postal: r.ship_postal, email: r.ship_email },
@@ -86,7 +95,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   const actorName = actorLabel;
   const audit = (q, actor, action, reference, now) => q.run('INSERT INTO audit_logs (occurred_at, actor, action, reference) VALUES (?, ?, ?, ?)', [now, actorName(actor), action, reference]);
   const event = (q, orderId, label, now) => q.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [orderId, now, label]);
-  const memberRow = (q, id) => q.get('SELECT * FROM members WHERE id=?', [id]);
+  const memberRow = async (q, id) => openRow(c, 'members', await q.get('SELECT * FROM members WHERE id=?', [id]));
 
   // ---- 注文
   async function quote(q, input) {
@@ -109,7 +118,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   const cleanQuote = q => ({ ...q, items: q.items.map(({ cost, sku, ...p }) => p) });
   async function placeOrder(q, input, actor, now, effects) {
     const member = actor.member; if (!member) fail('会員ログインが必要です。', 401);
-    const key = requestKeyOf(input), fingerprint = orderFingerprint(input);
+    const key = requestKeyOf(input), fingerprint = c.digest(orderFingerprint(input));
     const old = await q.get('SELECT id, member_id, fingerprint FROM orders WHERE request_key=?', [key]);
     if (old) { if (old.member_id !== member.id) fail('この注文は取得できません。', 403); if (old.fingerprint !== fingerprint) fail('同じ注文番号で内容を変更できません。カートを確認してください。', 409); return old.id; }
     const m = await memberRow(q, member.id);
@@ -130,7 +139,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       status, payment_status, ship_name, ship_postal, ship_address, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 'captured', ?, ?, ?, ?, NULL, 0, 0, ?, ?, ?)`,
     [id, key, fingerprint, m.id, salon.id, salon.name, salon.owner, staff?.id || '', staff?.name || '指名なし', salon.feeRate, feeOf(qt.subtotal, salon.feeRate), qt.subtotal, qt.shipping, qt.total, includedTax(qt.total),
-      customer.name, customer.postal, customer.address, customer.email, jst(now).slice(0, 10), now, now]);
+      ...[customer.name, customer.postal, customer.address, customer.email].map(c.encrypt), jst(now).slice(0, 10), now, now]);
     const dealers = [...new Set(qt.items.map(i => i.dealerId))];
     for (const [index, dealerId] of dealers.entries()) {
       const items = qt.items.filter(i => i.dealerId === dealerId), shipping = index === 0 ? qt.shipping : 0, poId = purchaseOrderId(id, index);
@@ -145,8 +154,9 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     await q.run('DELETE FROM cart_items WHERE member_id=?', [m.id]);
     // 次回の注文画面に出すお届け先（住所管理）
     const address = await q.get('SELECT id FROM member_addresses WHERE member_id=? AND is_default=1', [m.id]);
-    if (address) await q.run('UPDATE member_addresses SET name=?, postal=?, address=?, updated_at=? WHERE id=?', [customer.name, customer.postal, customer.address, now, address.id]);
-    else await q.run('INSERT INTO member_addresses (member_id, name, postal, address, is_default, updated_at) VALUES (?, ?, ?, ?, 1, ?)', [m.id, customer.name, customer.postal, customer.address, now]);
+    const sealed = [customer.name, customer.postal, customer.address].map(c.encrypt);
+    if (address) await q.run('UPDATE member_addresses SET name=?, postal=?, address=?, updated_at=? WHERE id=?', [...sealed, now, address.id]);
+    else await q.run('INSERT INTO member_addresses (member_id, name, postal, address, is_default, updated_at) VALUES (?, ?, ?, ?, 1, ?)', [m.id, ...sealed, now]);
     await audit(q, member, '受注・仕入先への自動発注', id, now);
     effects.push({ type: 'order_placed', orderId: id, memberId: m.id });
     return id;
@@ -163,6 +173,21 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   async function refundPayment(q, order, reason, now) {
     await q.run("UPDATE payments SET status='refunded', updated_at=? WHERE order_id=?", [now, order.id]);
     await q.run('INSERT INTO refunds (order_id, amount, reason, created_at) VALUES (?, ?, ?, ?)', [order.id, order.total, reason, now]);
+  }
+
+  // ---- お客様の個人情報へのアクセス記録（dist/access-log.js）。役割・操作・対象は日本語で保存する。
+  const accessFrom = r => ({ id: String(r.id), at: r.occurred_at, actorId: r.actor_id, actorName: r.actor_name, role: r.role, salonId: r.salon_id, action: r.action, target: r.target, count: num(r.record_count), refs: r.member_refs, purpose: r.purpose, channel: r.channel, ip: r.ip });
+  const recordAccess = (q, e, now) => q.run('INSERT INTO data_access_logs (occurred_at, actor_id, actor_name, role, salon_id, action, target, record_count, member_refs, purpose, channel, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [now, e.actorId, e.actorName, e.role, e.salonId || '', e.action, e.target, e.count, e.refs || '', e.purpose || '', e.channel || accessChannels.console, String(e.ip || '').slice(0, 60)]);
+  async function recordViews(q, op, ip, entries, now) {
+    for (const entry of entries) {
+      const last = await q.get('SELECT occurred_at, record_count FROM data_access_logs WHERE actor_id=? AND action=? AND target=? AND salon_id=? ORDER BY id DESC LIMIT 1', [op.id || '', accessActions.view, entry.target, entry.salonId]);
+      if (shouldRecordView(last && { at: last.occurred_at, count: last.record_count }, entry, now)) await recordAccess(q, { actorId: op.id || '', actorName: op.name, role: accessRoles[op.role], salonId: entry.salonId, action: accessActions.view, target: entry.target, count: entry.count, ip }, now);
+    }
+  }
+  async function accessLogs(q, op) {
+    const [where, params] = op.role === 'admin' ? ['', []] : op.role === 'salon' ? ['WHERE salon_id=?', [op.salonId]] : ['WHERE actor_id=?', [op.id || '']];
+    return (await q.all(`SELECT * FROM data_access_logs ${where} ORDER BY id DESC LIMIT ${ACCESS_LOG_LIMIT}`, params)).map(r => accessLogView(op, accessFrom(r)));
   }
 
   // ---- 管理画面
@@ -185,19 +210,22 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     const poItems = poRows.length ? await q.all(`SELECT * FROM order_items WHERE purchase_order_id IN (${marks(poRows)}) ORDER BY line_no`, poRows.map(p => p.id)) : [];
     const salonIds = op.role === 'admin' ? undefined : op.role === 'salon' ? [op.salonId] : [...new Set(poRows.map(p => p.salon_id))];
     // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（dist/privacy.js）
-    const members = op.role === 'salon' ? await q.all('SELECT * FROM members WHERE salon_id=? ORDER BY salon_linked_at, id', [op.salonId]) : [];
+    const members = op.role === 'salon' ? (await q.all('SELECT * FROM members WHERE salon_id=? ORDER BY salon_linked_at, id', [op.salonId])).map(m => openRow(c, 'members', m)) : [];
     const views = orders.map(o => orderView(o, allDealers, true));
     const salons = await loadSalons(q, { ids: salonIds });
+    // 個人情報を渡す場合（美容室・ディーラー）は、渡す前にアクセス記録を残す
+    await recordViews(q, op, actor.ip, viewEntries(op, { members: members.map(m => m.id), orders: orders.map(o => ({ salonId: o.row.salon_id, memberId: o.row.member_id })), shipments: poRows.map(p => ({ salonId: p.salon_id, memberId: p.member_id })) }), now);
     return {
       operator: op, revision: await revision(q),
       products: await loadProducts(q, { dealerId: op.role === 'dealer' ? op.dealerId : undefined, withCost: true }),
       salons, dealers,
       orders: views.map(o => orderForRole(op.role, o)),
-      purchaseOrders: poRows.map(p => ({ ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: p.ship_name, address: p.ship_address, postal: p.ship_postal, email: p.ship_email }, p.member_id) })),
+      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: o.ship_address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
       profiles: members.map(m => ({ ...profileFrom(m), ref: memberRef(m.id) })),
       customerStats: op.role === 'dealer' ? [] : await customerStats(q, salons, now),
       settlements: views.map(o => settlement(o)),
       events: op.role === 'admin' ? (await q.all('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 400')).map(e => ({ id: String(e.id), at: e.occurred_at, actor: e.actor, action: e.action, reference: e.reference })) : [],
+      accessLogs: await accessLogs(q, op),
       ...(await supply.snapshot(q, op)),
     };
   }
@@ -245,7 +273,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       if (!actor.member) return null;
       const m = await memberRow(q, actor.member.id); if (!m?.salon_id) return null;
       const salon = await q.get('SELECT name, enabled FROM salons WHERE id=?', [m.salon_id]);
-      const address = await q.get('SELECT name, postal, address FROM member_addresses WHERE member_id=? AND is_default=1', [m.id]);
+      const address = openRow(c, 'member_addresses', await q.get('SELECT name, postal, address FROM member_addresses WHERE member_id=? AND is_default=1', [m.id]));
       return { ...profileFrom(m), salonName: salon?.name || '', salonEnabled: bool(salon?.enabled), address: address || null };
     }
     if (route === '/profile' && method === 'PATCH') {
@@ -305,7 +333,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
         if (order.status === 'return_requested') return orderById(q, order.id);
         if (!['shipped', 'delivered'].includes(order.status)) fail('全商品の出荷後に返品を申請できます。', 409);
         const reason = required(input?.reason, 300);
-        await q.run("UPDATE orders SET status='return_requested', return_reason=?, updated_at=? WHERE id=?", [reason, now, order.id]);
+        await q.run("UPDATE orders SET status='return_requested', return_reason=?, updated_at=? WHERE id=?", [c.encrypt(reason), now, order.id]);
         await event(q, order.id, '返品を受け付けました', now);
         await audit(q, by, '返品申請', order.id, now);
       }
@@ -341,7 +369,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       await q.run("UPDATE orders SET status='returned', payment_status='refunded', updated_at=? WHERE id=?", [now, order.id]);
       await restoreStock(q, order.id, 'return', op, now);
       await q.run("UPDATE purchase_orders SET status='returned', updated_at=? WHERE order_id=?", [now, order.id]);
-      await refundPayment(q, order, order.return_reason || '返品', now);
+      await refundPayment(q, order, '返品', now);
       await event(q, order.id, '返品検品・テスト返金が完了しました', now);
       await audit(q, op, '返品検品・返金完了', order.id, now);
       return orderById(q, order.id);
@@ -394,7 +422,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     if (memberAction && method === 'PATCH') {
       const op = requireOperator(actor, ['admin']);
       const key = decodeURIComponent(memberAction[1]).trim().toUpperCase();
-      const found = (await memberRow(q, memberAction[1])) ? [await memberRow(q, memberAction[1])] : (await q.all('SELECT * FROM members WHERE salon_id IS NOT NULL')).filter(r => memberRef(r.id) === key);
+      const found = (await memberRow(q, memberAction[1])) ? [await memberRow(q, memberAction[1])] : (await q.all('SELECT id, salon_id FROM members WHERE salon_id IS NOT NULL')).filter(r => memberRef(r.id) === key);
       const m = found.length === 1 ? found[0] : null; if (!m?.salon_id) fail('会員番号に該当する会員が見つかりません。', 404);
       const salon = await salonById(q, input?.salonId);
       if (!salon.enabled && salon.id !== m.salon_id) fail('受付を停止しているサロンには紐付けできません。', 409);
@@ -404,6 +432,16 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       const updated = await memberRow(q, m.id);
       return { ref: memberRef(m.id), salonId: updated.salon_id, staffId: updated.staff_id || '' };
     }
+    // CSV出力の記録（美容室が自店のお客様の情報を含む一覧を出力するとき）。出力する行が自店の範囲内か確かめてから記録する。
+    if (route === '/admin/exports' && method === 'POST') {
+      const op = requireOperator(actor, ['salon']), { kind, target, ids } = exportInput(input);
+      if (!ids.length) return { logged: 0 };
+      const table = kind === 'orders' ? 'orders' : 'members';
+      const found = await q.all(`SELECT id FROM ${table} WHERE salon_id=? AND id IN (${marks(ids)})`, [op.salonId, ...ids]);
+      if (found.length !== ids.length) fail('出力する対象を確認してください。', 403);
+      await recordAccess(q, { actorId: op.id || '', actorName: op.name, role: accessRoles.salon, salonId: op.salonId, action: accessActions.export, target, count: ids.length, ip: actor.ip }, now);
+      return { logged: 1 };
+    }
     // 加盟店からの仕入発注・定期発注・月次請求（db/supply-store.mjs）
     const supplyResult = await supply.handle(q, route, method, input, actor, now, effects);
     if (supplyResult !== undefined) return supplyResult;
@@ -411,9 +449,58 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   }
   const supply = createSupplyStore({ db, loadProducts, audit });
 
+  // ---- 個人情報の暗号化（版の更新時・鍵を設定したとき）
+  // 暗号化に合わせた列の追加・拡張（schema_version 3 → 4）。SQLite は列の型の長さを問わない。
+  async function widenForEncryption() {
+    if (db.dialect === 'sqlite') return db.exec('ALTER TABLE members ADD COLUMN email_index TEXT');
+    await db.exec("ALTER TABLE members DROP INDEX email, ADD COLUMN email_index VARCHAR(64) NULL AFTER email, ADD UNIQUE KEY members_email_index (email_index), MODIFY email VARCHAR(512) NOT NULL, MODIFY name VARCHAR(512) NOT NULL, MODIFY kana VARCHAR(512) NOT NULL DEFAULT '', MODIFY phone VARCHAR(128) NOT NULL DEFAULT '', MODIFY gender VARCHAR(128) NOT NULL DEFAULT '', MODIFY birthday VARCHAR(128) NOT NULL DEFAULT ''");
+    await db.exec('ALTER TABLE member_addresses MODIFY name VARCHAR(512) NOT NULL, MODIFY postal VARCHAR(128) NOT NULL, MODIFY address VARCHAR(1500) NOT NULL');
+    await db.exec('ALTER TABLE orders MODIFY ship_name VARCHAR(512) NOT NULL, MODIFY ship_postal VARCHAR(128) NOT NULL, MODIFY ship_address VARCHAR(1500) NOT NULL, MODIFY ship_email VARCHAR(512) NOT NULL, MODIFY return_reason VARCHAR(1700) NULL');
+  }
+  // 暗号化していない行（前の版のDB・鍵なしで作ったDB）を暗号化し、メールアドレスの検索用の値を作る。
+  // 暗号化した鍵の確認値を app_meta に残し、違う鍵・鍵なしで起動したら止める（読めない値を書き足さないため）。
+  async function sealExisting() {
+    const check = c.enabled ? c.blindIndex(KEY_CHECK) : '';
+    const saved = (await db.get("SELECT meta_value FROM app_meta WHERE meta_key='encryption_check'"))?.meta_value;
+    if (saved && saved !== check) throw Error(c.enabled ? 'DATA_ENCRYPTION_KEY が、このデータベースを暗号化した鍵と違います。' : 'このデータベースは暗号化されています。DATA_ENCRYPTION_KEY を設定してください。');
+    if (saved) return;
+    const sealedAll = (table, row) => SEALED_COLUMNS[table].every(k => isSealed(row[k]));
+    const hashed = value => /^[0-9a-f]{64}$/.test(value || '');
+    const changed = await db.transaction(async tx => {
+      let n = 0;
+      for (const m of await tx.all('SELECT id, email, email_index, name, kana, phone, gender, birthday FROM members')) {
+        if (m.email_index && (!c.enabled || sealedAll('members', m))) continue;
+        const plain = openRow(c, 'members', m), sealed = sealRow(c, 'members', plain);
+        await tx.run('UPDATE members SET email=?, email_index=?, name=?, kana=?, phone=?, gender=?, birthday=? WHERE id=?', [sealed.email, c.blindIndex(plain.email), sealed.name, sealed.kana, sealed.phone, sealed.gender, sealed.birthday, m.id]);
+        n++;
+      }
+      if (!c.enabled) return n;
+      for (const a of await tx.all('SELECT id, name, postal, address FROM member_addresses')) {
+        if (sealedAll('member_addresses', a)) continue;
+        const sealed = sealRow(c, 'member_addresses', a);
+        await tx.run('UPDATE member_addresses SET name=?, postal=?, address=? WHERE id=?', [sealed.name, sealed.postal, sealed.address, a.id]); n++;
+      }
+      for (const o of await tx.all('SELECT id, fingerprint, ship_name, ship_postal, ship_address, ship_email, return_reason FROM orders')) {
+        if (sealedAll('orders', o) && hashed(o.fingerprint)) continue;
+        const sealed = sealRow(c, 'orders', o);
+        await tx.run('UPDATE orders SET fingerprint=?, ship_name=?, ship_postal=?, ship_address=?, ship_email=?, return_reason=? WHERE id=?', [hashed(o.fingerprint) ? o.fingerprint : c.digest(o.fingerprint), sealed.ship_name, sealed.ship_postal, sealed.ship_address, sealed.ship_email, sealed.return_reason, o.id]); n++;
+      }
+      await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('encryption_check', ?)", [check]);
+      return n;
+    });
+    // 暗号化前の値がファイルの空き領域に残らないよう、SQLite のファイルを詰め直す
+    if (changed && c.enabled && db.dialect === 'sqlite') { await db.exec('VACUUM'); await db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); }
+  }
+
   return {
-    // テーブル作成・旧データの移行・初期データ投入
+    // テーブル作成・旧データの移行・初期データ投入。
+    // 版が最新なら表の作成・変更（DDL）を行わない。本番ではアプリ用のDBユーザーにDDLの権限を与えず、
+    // 版の更新は表を変更できるユーザーで `npm run db:migrate` を実行して行う（db/grants.mysql.sql）。
     async init({ now = new Date().toISOString() } = {}) {
+      if (await db.tableExists('app_meta') && (await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'"))?.meta_value === SCHEMA_VERSION) {
+        await sealExisting();
+        return { imported: false };
+      }
       let legacyState = null, legacyMembers = [], legacySessions = [];
       if (db.dialect === 'sqlite') {
         const rename = async (from, to, test) => { if (await db.tableExists(from) && test(await db.tableColumns(from)) && !(await db.tableExists(to))) await db.exec(`ALTER TABLE ${from} RENAME TO ${to}`); };
@@ -423,15 +510,17 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
         await rename('orders', 'legacy_orders', cols => cols.includes('payload'));
         await rename('platform_state', 'legacy_platform_state', () => true);
       }
-      // 前の版で作ったテーブルへの列追加（卸価格・管理者のLINE ID）
+      // 前の版で作ったテーブルへの列追加（卸価格・管理者のLINE ID・同意の記録・個人情報の暗号化）
       let addedWholesale = false;
       if (await db.tableExists('products') && !(await db.tableColumns('products')).includes('wholesale_price')) { await db.exec('ALTER TABLE products ADD COLUMN wholesale_price INT NOT NULL DEFAULT 0'); addedWholesale = true; }
       if (await db.tableExists('members') && (await db.tableColumns('members')).includes('email') && !(await db.tableColumns('members')).includes('privacy_version')) { await db.exec(`ALTER TABLE members ADD COLUMN privacy_version ${db.dialect === 'mysql' ? 'VARCHAR(20)' : 'TEXT'} NULL`); await db.exec(`ALTER TABLE members ADD COLUMN privacy_agreed_at ${db.dialect === 'mysql' ? 'VARCHAR(30)' : 'TEXT'} NULL`); }
       if (await db.tableExists('operators') && !(await db.tableColumns('operators')).includes('line_id')) await db.exec(db.dialect === 'mysql' ? 'ALTER TABLE operators ADD COLUMN line_id VARCHAR(100) NULL, ADD UNIQUE KEY operators_line_id (line_id)' : 'ALTER TABLE operators ADD COLUMN line_id TEXT');
+      if (await db.tableExists('members') && (await db.tableColumns('members')).includes('email') && !(await db.tableColumns('members')).includes('email_index')) await widenForEncryption();
       await db.migrate();
+      if (db.dialect === 'sqlite') await db.exec(APPEND_ONLY_SQLITE);
       if (addedWholesale) for (const p of await db.all('SELECT id, price FROM products')) await db.run('UPDATE products SET wholesale_price=? WHERE id=?', [wholesaleOf(num(p.price)), p.id]);
-      await db.run("UPDATE app_meta SET meta_value='3' WHERE meta_key='schema_version'");
-      if (await db.get('SELECT id FROM salons LIMIT 1')) return { imported: false };
+      await db.run("UPDATE app_meta SET meta_value=? WHERE meta_key='schema_version'", [SCHEMA_VERSION]);
+      if (await db.get('SELECT id FROM salons LIMIT 1')) { await sealExisting(); return { imported: false }; }
       if (db.dialect === 'sqlite' && await db.tableExists('legacy_platform_state')) {
         const row = await db.get('SELECT payload FROM legacy_platform_state WHERE id=1');
         if (row) { legacyState = JSON.parse(row.payload); migrate(legacyState, catalog); }
@@ -441,14 +530,27 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       const state = legacyState || createPlatform(catalog, now);
       const operatorPassword = await passwordDigest(DEMO_OPERATOR_PASSWORD);
       const result = await db.transaction(async tx => {
-        const counts = await importState(tx, state, { catalog, concernNames, legacyMembers, legacySessions, now });
+        const counts = await importState(tx, state, { catalog, concernNames, legacyMembers, legacySessions, now, fieldCrypto: c });
         // デモ用の管理アカウント（本番では管理画面から個別のパスワードで作成する）
         for (const op of demoOperators) await tx.run('INSERT INTO operators (id, email, name, role, salon_id, dealer_id, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [op.id, op.email, op.name, op.role, op.salonId || null, op.dealerId || null, operatorPassword.salt, operatorPassword.hash, now]);
-        await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '3')");
+        await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', ?)", [SCHEMA_VERSION]);
         return counts;
       });
+      await sealExisting();
       return { imported: Boolean(legacyState), ...result };
     },
+    // 保守ツール（scripts/customer-lookup.mjs）：会員番号で1件だけ復号して参照する。担当者名と目的を記録してから返す。
+    async lookupMember(input, now = new Date().toISOString()) {
+      const { ref, by, purpose } = lookupInput(input);
+      const matches = (await db.all('SELECT id FROM members')).filter(r => memberRef(r.id) === ref);
+      if (matches.length !== 1) fail('会員番号に該当する会員が見つかりません。', 404);
+      const m = await memberRow(db, matches[0].id);
+      await recordAccess(db, { actorId: `maintenance:${by}`, actorName: by, role: accessRoles.maintenance, salonId: m.salon_id || '', action: accessActions.lookup, target: accessTargets.member, count: 1, refs: ref, purpose, channel: accessChannels.maintenance }, now);
+      const address = openRow(c, 'member_addresses', await db.get('SELECT name, postal, address FROM member_addresses WHERE member_id=? AND is_default=1', [m.id]));
+      const { id, ...profile } = profileFrom(m);
+      return { ref, ...profile, address: address || null, orders: num((await db.get('SELECT COUNT(*) AS n FROM orders WHERE member_id=?', [m.id])).n) };
+    },
+    fieldCrypto: c,
     // 変更を伴う処理は1つのトランザクションで行い、確定した場合だけ effects（通知の種類）を返す
     async request(route, method, input, actor = {}, now = new Date().toISOString(), effects = []) {
       if (method === 'GET' || READ_ONLY.has(route)) return handle(db, route, method, input, actor, now, []);

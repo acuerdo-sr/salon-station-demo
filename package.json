@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "build:pages": "node scripts/build-pages.mjs",
+    "db:migrate": "node --env-file-if-exists=.env scripts/db-migrate.mjs",
+    "customer:lookup": "node --env-file-if-exists=.env scripts/customer-lookup.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "engines": {

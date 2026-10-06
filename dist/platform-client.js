@@ -23,9 +23,12 @@ export async function platform(route,method='GET',input){
     const {member}=await api('/auth/me');
     // 期日を迎えた定期発注を作成する（サーバー版では一定間隔で自動実行）
     const due=runSubscriptions(state,new Date().toISOString());if(due.created.length||due.failed.length){state.revision++;raw=null;}
+    const lastAccess=state.accessLogs?.[0]?.id;
     const result=platformRequest(state,route,method,input,{operator,member});
-    // 変更を伴う処理は保存する。カート・お気に入りは他の画面の再読み込みを促さない（更新番号を上げない）。
-    const readOnly=method==='GET'||['/quote','/admin/sales'].includes(route),quiet=['/cart','/favorites'].includes(route);
+    // 個人情報を含む画面を開いた記録（アクセス記録）は、読み出しでも保存する
+    if(state.accessLogs?.[0]?.id!==lastAccess)raw=null;
+    // 変更を伴う処理は保存する。カート・お気に入り・出力の記録は他の画面の再読み込みを促さない（更新番号を上げない）。
+    const readOnly=method==='GET'||['/quote','/admin/sales'].includes(route),quiet=['/cart','/favorites','/admin/exports'].includes(route);
     if(!raw||!readOnly){if(!readOnly&&!quiet)state.revision++;try{localStorage.setItem(key,JSON.stringify(state));}catch{throw Error('保存できません。ブラウザの保存設定を確認してください。');}}
     return result;
   };

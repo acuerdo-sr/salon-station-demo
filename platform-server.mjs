@@ -10,7 +10,7 @@ const operatorFrom = row => row && ({ id: row.id, role: row.role, ...(row.salon_
 function failWith(message, status) { const e = new Error(message); e.status = status; throw e; }
 
 export async function createPlatformServer(db, catalog, auth, options = {}) {
-  const store = createPlatformStore(db, { catalog, concernNames: options.concernNames });
+  const store = createPlatformStore(db, { catalog, concernNames: options.concernNames, fieldCrypto: options.fieldCrypto });
   const initialized = await store.init();
   if (initialized.imported) console.log(`旧形式のデータを移行しました（店舗${initialized.salons}・会員${initialized.members}・注文${initialized.orders}）。`);
   const limiter = createLimiter(), secure = options.secure ? '; Secure' : '', trustProxy = options.trustProxy ?? process.env.TRUST_PROXY === '1';
@@ -62,7 +62,8 @@ export async function createPlatformServer(db, catalog, auth, options = {}) {
         cookie(res, value, SESSION_AGE / 1000);
         return { operator: operatorFrom(owner) };
       }
-      const actor = { operator: await operator(req), member: await auth.member(req) }, effects = [];
+      // ip はアクセス記録（個人情報を含む画面を開いた記録）に残す接続元
+      const actor = { operator: await operator(req), member: await auth.member(req), ip: clientIp(req, trustProxy) }, effects = [];
       const result = await store.request(route, method, input, actor, new Date().toISOString(), effects);
       // 確定後の通知など（LINE通知）。実際に状態が変わったとき（effects）だけ渡し、失敗しても応答には影響させない。
       if (effects.length) Promise.resolve().then(() => options.onChange?.({ effects, store })).catch(error => console.error('onChange:', error.message));

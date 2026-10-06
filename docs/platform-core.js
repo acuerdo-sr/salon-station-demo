@@ -1,6 +1,7 @@
 // Shared business rules for the local server and the browser-only public demo.
 import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf } from './supply-core.js';
 import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js';
+import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, ACCESS_LOG_LIMIT } from './access-log.js';
 export const demoOperators = [
   {id:'admin',role:'admin',name:'運営管理者',email:'admin@example.test'},
   {id:'salon-a',role:'salon',salonId:'lumiere',name:'LUMIÈRE 店舗担当',email:'salon@example.test'},
@@ -56,6 +57,9 @@ export function salesReport(state,input,actor,now=new Date().toISOString()){
   return {from,to,unit,unitName:salesUnits[unit],rows,salons:salons.map(s=>({salonId:s.id,salonName:s.name,...summarize(orders.filter(o=>o.salonId===s.id))})),total:summarize(orders)};
 }
 function log(state,actor,action,reference,now){state.events.unshift({id:crypto.randomUUID(),at:now,actor:actorLabel(actor),action,reference});state.events=state.events.slice(0,400);}
+// お客様の個人情報へのアクセス記録（access-log.js）。DB版の data_access_logs と同じ項目を新しい順に持つ。
+function recordAccess(state,e,now){state.accessLogs.unshift({id:crypto.randomUUID(),at:now,actorId:e.actorId,actorName:e.actorName,role:e.role,salonId:e.salonId||'',action:e.action,target:e.target,count:e.count,refs:e.refs||'',purpose:e.purpose||'',channel:e.channel||accessChannels.console,ip:String(e.ip||'').slice(0,60)});state.accessLogs=state.accessLogs.slice(0,1000);}
+function recordViews(state,op,ip,entries,now){for(const entry of entries){const last=state.accessLogs.find(l=>l.actorId===(op.id||'')&&l.action===accessActions.view&&l.target===entry.target&&l.salonId===entry.salonId);if(shouldRecordView(last,entry,now))recordAccess(state,{actorId:op.id||'',actorName:op.name,role:accessRoles[op.role],salonId:entry.salonId,action:accessActions.view,target:entry.target,count:entry.count,ip},now);}}
 
 // 店舗マスタ（仕様書 2.6.1）：住所・電話番号・営業時間・定休日・備考を保持する。すべて架空。
 export const seedSalons=()=>[
@@ -72,14 +76,14 @@ export function migrate(state,catalog){
   if(state.salonSeq===undefined&&Array.isArray(state.salons)){state.salonSeq=salonSeqFrom(state.salons);changed=true;}
   if(!state.carts){state.carts={};changed=true;}if(!state.favorites){state.favorites={};changed=true;}
   for(const p of state.products||[])if(p.wholesalePrice===undefined){p.wholesalePrice=wholesaleOf(p.price);changed=true;}
-  for(const k of ['supplyOrders','supplySubscriptions','invoices'])if(!Array.isArray(state[k])){state[k]=[];changed=true;}
+  for(const k of ['supplyOrders','supplySubscriptions','invoices','accessLogs'])if(!Array.isArray(state[k])){state[k]=[];changed=true;}
   return changed;
 }
 
 export const seedDealers=()=>[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}];
 export function createPlatform(catalog,now=new Date().toISOString()){
   const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
-    salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[]};
+    salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[],accessLogs:[]};
   // Clearly fictional examples make the management screens useful on first visit.
   for(let i=0;i<8;i++){
     const salon=state.salons[i%3],product=state.products[i%5];
@@ -206,11 +210,14 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const pos=state.purchaseOrders.filter(p=>op.role==='admin'||op.role==='dealer'&&p.dealerId===op.dealerId||op.role==='salon'&&p.salonId===op.salonId);
     const orders=state.orders.filter(o=>allowedOrder(actor,o)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
     pos.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+    // 個人情報を渡す場合（美容室・ディーラー）は、渡す前にアクセス記録を残す
+    const members=op.role==='salon'?state.profiles.filter(p=>p.salonId===op.salonId):[];
+    recordViews(state,op,actor.ip,viewEntries(op,{members:members.map(p=>p.id),orders:orders.map(o=>({salonId:o.salonId,memberId:o.memberId})),shipments:pos.map(p=>({salonId:p.salonId,memberId:state.orders.find(o=>o.id===p.orderId)?.memberId}))}),now);
     return {operator:clone(op),revision:state.revision,products:clone(state.products.filter(p=>op.role!=='dealer'||p.dealerId===op.dealerId)),salons:clone(state.salons.filter(s=>op.role==='admin'||op.role==='salon'&&s.id===op.salonId||op.role==='dealer'&&pos.some(p=>p.salonId===s.id))),dealers:clone(state.dealers.filter(d=>op.role!=='dealer'||d.id===op.dealerId)),
       // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（privacy.js）
       orders:orders.map(o=>orderForRole(op.role,{...customerOrder(state,o),fee:o.fee,items:clone(o.items)})),
       purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:customerFor(op.role,clone(o.customer),o.memberId)};}),
-      profiles:op.role==='salon'?clone(state.profiles.filter(p=>p.salonId===op.salonId)).map(p=>({...p,ref:memberRef(p.id)})):[],
+      profiles:clone(members).map(p=>({...p,ref:memberRef(p.id)})),accessLogs:state.accessLogs.filter(row=>accessLogVisible(op,row)).slice(0,ACCESS_LOG_LIMIT).map(row=>accessLogView(op,clone(row))),
       customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
   }
   const poAction=route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
@@ -263,6 +270,13 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const op=requireOperator(actor,['admin']),key=decodeURIComponent(memberAction[1]).trim().toUpperCase(),matches=state.profiles.filter(p=>p.id===memberAction[1]||memberRef(p.id)===key);if(matches.length!==1)fail('会員番号に該当する会員が見つかりません。',404);const profile=matches[0];
     const salon=salonFor(state,input?.salonId);if(!salon.enabled&&salon.id!==profile.salonId)fail('受付を停止しているサロンには紐付けできません。',409);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
     profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',memberRef(profile.id),now);return {ref:memberRef(profile.id),salonId:profile.salonId,staffId:profile.staffId};
+  }
+  // CSV出力の記録（美容室が自店のお客様の情報を含む一覧を出力するとき）。出力する行が自店の範囲内か確かめてから記録する。
+  if(route==='/admin/exports'&&method==='POST'){
+    const op=requireOperator(actor,['salon']),{kind,target,ids}=exportInput(input);if(!ids.length)return {logged:0};
+    const inScope=kind==='orders'?id=>state.orders.some(o=>o.id===id&&o.salonId===op.salonId):id=>state.profiles.some(p=>p.id===id&&p.salonId===op.salonId);
+    if(!ids.every(inScope))fail('出力する対象を確認してください。',403);
+    recordAccess(state,{actorId:op.id||'',actorName:op.name,role:accessRoles.salon,salonId:op.salonId,action:accessActions.export,target,count:ids.length,ip:actor.ip},now);return {logged:1};
   }
   // 加盟店からの仕入発注・定期発注・月次請求（supply-core.js）
   const supply=supplyRequest(state,route,method,input,actor,now,effects);if(supply!==undefined)return supply;

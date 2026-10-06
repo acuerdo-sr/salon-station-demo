@@ -13,7 +13,8 @@ const schemaStatements = dialect => readFileSync(path.join(here, `schema.${diale
 export async function createSqliteAdapter(file) {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(file);
-  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+  // secure_delete：削除・更新で空いた領域を0で上書きし、古い個人情報がファイルに残らないようにする
+  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA secure_delete=ON;');
   let queue = Promise.resolve();
   const exclusive = task => { const run = queue.then(task, task); queue = run.catch(() => {}); return run; };
   const statements = new Map();

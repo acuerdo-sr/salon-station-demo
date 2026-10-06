@@ -2,38 +2,14 @@
 // 同じ結果になることを確認する。TEST_MYSQL_URL=mysql://… を指定すると MySQL 8.0 でも実行する（データベースは空にして使う）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { products, concernCategories } from '../catalog.mjs';
-import { createPlatform, platformRequest, demoOperators } from '../dist/platform-core.js';
-import { createSqliteAdapter, createMysqlAdapter } from '../db/adapter.mjs';
-import { createPlatformStore } from '../db/platform-store.mjs';
+import { demoOperators } from '../dist/platform-core.js';
+import { engines as createEngines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z';
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
 const customer = { name: 'デモ 花子', address: '架空県 1-2-3', postal: '0000000' };
-const TABLES = ['notifications', 'audit_logs', 'stock_movements', 'refunds', 'payments', 'order_events', 'order_items', 'purchase_orders', 'orders', 'favorites', 'cart_items', 'operator_sessions', 'operators', 'member_addresses', 'member_sessions', 'members', 'product_concerns', 'products', 'concerns', 'categories', 'staff', 'salons', 'dealers', 'counters', 'app_meta'];
-
-async function sqlEngine(db) {
-  const store = createPlatformStore(db, { catalog: products, concernNames: concernCategories });
-  await store.init({ now });
-  return {
-    sql: true, db, store,
-    call: (route, method, input, actor = {}, at = now, effects = []) => store.request(route, method, input, actor, at, effects),
-    async member(id, name = 'デモ 花子') { const email = `${id}@example.test`; await db.run('INSERT INTO members (id, email, password_salt, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, email, '00', '00', name, now, now]); return { member: { id, name, email } }; },
-    close: () => db.close(),
-  };
-}
-const engines = [
-  ['browser', async () => { const state = createPlatform(products, now); return { state, call: async (route, method, input, actor = {}, at = now, effects = []) => platformRequest(state, route, method, input, actor, at, effects), member: async (id, name = 'デモ 花子') => ({ member: { id, name, email: `${id}@example.test` } }), close: async () => {} }; }],
-  ['sqlite', async () => sqlEngine(await createSqliteAdapter(':memory:'))],
-];
-if (process.env.TEST_MYSQL_URL) engines.push(['mysql', async () => {
-  const db = await createMysqlAdapter(process.env.TEST_MYSQL_URL);
-  await db.exec('SET FOREIGN_KEY_CHECKS=0');
-  for (const table of TABLES) await db.exec(`DROP TABLE IF EXISTS ${table}`);
-  await db.exec('SET FOREIGN_KEY_CHECKS=1');
-  return sqlEngine(db);
-}]);
-
+// ブラウザ版・SQLite（・MySQL）の作り方は helpers/engines.mjs に共通化（DB版は個人情報を暗号化して保存）
+const engines = createEngines(now);
 const line = (id, quantity, price) => ({ id, quantity, price });
 const order = (e, actor, items, at = now, salonId = 'lumiere', effects = []) => e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId, items, customer }, actor, at, effects);
 const stockOf = async (e, id) => (await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === id).stock;
@@ -213,7 +189,9 @@ for (const [name, create] of engines) {
       const placed = results.find(r => r.status === 'fulfilled').value;
       assert.equal(Number((await e.db.get('SELECT tax_total FROM orders WHERE id=?', [placed.id])).tax_total), Math.floor(3520 * 10 / 110));
       assert.equal((await e.db.get('SELECT status FROM payments WHERE order_id=?', [placed.id])).status, 'captured');
-      assert.equal((await e.db.get("SELECT address FROM member_addresses WHERE member_id=?", [placed.memberId])).address, customer.address);
+      // お届け先は暗号化して保存される
+      const stored = (await e.db.get("SELECT address FROM member_addresses WHERE member_id=?", [placed.memberId])).address;
+      assert.match(stored, /^enc:v1:/); assert.equal(e.fieldCrypto.decrypt(stored), customer.address);
       assert.equal((await e.call('/profile', 'GET', undefined, placed.memberId === 'a' ? a : b)).address.postal, '0000000');
       assert.equal(await e.store.claimNotification('a', 'line', 'order_placed', placed.id), true);
       assert.equal(await e.store.claimNotification('a', 'line', 'order_placed', placed.id), false);

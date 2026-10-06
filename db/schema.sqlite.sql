@@ -37,17 +37,20 @@ CREATE TABLE IF NOT EXISTS product_concerns (
   product_id TEXT NOT NULL REFERENCES products(id), concern_id TEXT NOT NULL REFERENCES concerns(id),
   PRIMARY KEY (product_id, concern_id));
 
--- 会員（担当店舗・担当スタッフ・LINE ID を含む）
+-- 会員（担当店舗・担当スタッフ・LINE ID を含む）。メール・氏名・フリガナ・電話・性別・生年月日はアプリで暗号化して保存し（db/crypto.mjs）、
+-- メールアドレスでの検索・重複確認は email_index（鍵付きハッシュ）で行う。
 CREATE TABLE IF NOT EXISTS members (
-  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL,
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, email_index TEXT, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL,
   name TEXT NOT NULL, kana TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', gender TEXT NOT NULL DEFAULT '', birthday TEXT NOT NULL DEFAULT '',
   line_id TEXT UNIQUE, salon_id TEXT REFERENCES salons(id), staff_id TEXT REFERENCES staff(id), salon_linked_at TEXT,
   privacy_version TEXT, privacy_agreed_at TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS members_salon ON members(salon_id);
+CREATE UNIQUE INDEX IF NOT EXISTS members_email_index ON members(email_index);
 CREATE TABLE IF NOT EXISTS member_sessions (
   token_hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS member_sessions_member ON member_sessions(member_id);
+-- お届け先（お名前・郵便番号・住所は暗号化して保存）
 CREATE TABLE IF NOT EXISTS member_addresses (
   id INTEGER PRIMARY KEY AUTOINCREMENT, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
   name TEXT NOT NULL, postal TEXT NOT NULL, address TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL);
@@ -72,7 +75,8 @@ CREATE TABLE IF NOT EXISTS favorites (
   member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, product_id TEXT NOT NULL REFERENCES products(id),
   created_at TEXT NOT NULL, PRIMARY KEY (member_id, product_id));
 
--- 注文（注文時点の価格・店舗・担当者・お届け先を写して保存する）
+-- 注文（注文時点の価格・店舗・担当者・お届け先を写して保存する）。お届け先 ship_* と返品理由は暗号化して保存し、
+-- 再送の照合用 fingerprint（お届け先を含む注文内容）は鍵付きハッシュで保存する。
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL,
   member_id TEXT NOT NULL REFERENCES members(id), salon_id TEXT NOT NULL REFERENCES salons(id),
@@ -121,6 +125,17 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 CREATE INDEX IF NOT EXISTS stock_movements_product ON stock_movements(product_id, id);
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, reference TEXT NOT NULL DEFAULT '');
+-- お客様の個人情報へのアクセス記録（誰が・いつ・どの店舗のお客様の情報を・何件・何のために）。値そのものは記録しない。
+-- 役割（美容室・ディーラー・DB保守など）・操作（表示・CSV出力・保守ツールで参照）・対象・経路は日本語で保存する（dist/access-log.js）。
+-- 追記のみ：SQLite では変更・削除を拒否するトリガーを起動時に作る。MySQL では db/grants.mysql.sql でアプリに追加と参照の権限だけを与える。
+CREATE TABLE IF NOT EXISTS data_access_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
+  actor_id TEXT NOT NULL, actor_name TEXT NOT NULL, role TEXT NOT NULL,
+  salon_id TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, target TEXT NOT NULL,
+  record_count INTEGER NOT NULL DEFAULT 0, member_refs TEXT NOT NULL DEFAULT '', purpose TEXT NOT NULL DEFAULT '',
+  channel TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS data_access_logs_salon ON data_access_logs(salon_id, id);
+CREATE INDEX IF NOT EXISTS data_access_logs_actor ON data_access_logs(actor_id, action, target, id);
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT, member_id TEXT NOT NULL, channel TEXT NOT NULL, kind TEXT NOT NULL, reference TEXT NOT NULL,
   status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
