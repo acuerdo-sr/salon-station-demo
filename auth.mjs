@@ -35,7 +35,7 @@ export function createAuth(db, options = {}) {
   // LINE経由の簡略登録（仕様書 2.2.7 ②）。メールアドレスが既存会員と一致すればそのアカウントに連携する。
   async function createFromLine({ lineId, name, email }) {
     // LINEでの簡略登録はフリガナなしで作り、注文の前にマイページで登録してもらう
-    const fields = validateMember({ salon: 'LINE登録', name, email }, { kanaRequired: false });
+    const fields = validateMember({ salon: 'LINE登録', name, email }, { complete: false });
     const existing = await byEmail('id', fields.email);
     if (existing) return linkLine(existing.id, lineId);
     const digest = await passwordDigest(randomBytes(24).toString('hex'));
@@ -82,7 +82,7 @@ export function createAuth(db, options = {}) {
     async request(route, method, input, req, res) {
       if (route === '/api/auth/me' && method === 'GET') return { member: await member(req) };
       if (route === '/api/auth/register' && method === 'POST') {
-        const fields = validateMember(input, { kanaRequired: true });
+        const fields = validateMember(input);
         validatePassword(input.password);
         const consent = privacyConsent(input);
         if (await byEmail('id', fields.email)) throw Error('このデモ用メールアドレスは登録済みです。');
@@ -160,7 +160,7 @@ export function createAuth(db, options = {}) {
         const active = await member(req);
         if (!active) throw Error('ログインし直してください。');
         // 送られなかった項目は今の値のまま（部分更新）。メールアドレス（ログインID）は変えない
-        const fields = validateMember({ ...active, ...input, email: active.email }, { kanaRequired: true });
+        const fields = validateMember({ ...active, ...input, email: active.email });
         await db.run('UPDATE members SET name=?, kana=?, phone=?, gender=?, birthday=?, updated_at=? WHERE id=?', [...['name', 'kana', 'phone', 'gender', 'birthday'].map(k => c.encrypt(fields[k])), new Date().toISOString(), active.id]);
         return { member: await findById(active.id) };
       }

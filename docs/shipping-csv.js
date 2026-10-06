@@ -19,9 +19,11 @@ function itemLines(items) {
   const lines = items.map(i => `${i.name} ×${i.quantity}`);
   return Array.from({ length: 5 }, (_, i) => i < 4 || lines.length <= 5 ? (lines[i] || '') : `${lines[4]} ほか${lines.length - 5}点`);
 }
-// to / from：{ name, postal, address, phone }
+// お届け先の住所は「都道府県＋市区町村」「番地」「建物名・部屋番号」の3列。項目を分けていない以前の版の住所は16文字ずつ分ける
+const addressColumns = a => a.prefecture && a.city ? [`${a.prefecture}${a.city}`, a.street || '', a.building || ''] : splitText(a.address);
+// to：{ name, postal, prefecture, city, street, building, address, phone }、from：{ name, postal, address, phone }
 export function shippingRow({ reference, to, from, items, note = '' }) {
-  return [reference, phone(to.phone), digits(to.postal), ...splitText(to.address), to.name, '',
+  return [reference, phone(to.phone), digits(to.postal), ...addressColumns(to), to.name, '',
     phone(from.phone), digits(from.postal), ...splitText(from.address, ADDRESS_FIELD_LENGTH, 2), from.name, ...itemLines(items), 1, SERVICE, note];
 }
 export const shippingFileName = (kind, today) => `出荷指示_${kind === 'supplyOrders' ? '加盟店発注' : 'EC注文'}_${today.replaceAll('-', '')}.csv`;

@@ -6,7 +6,7 @@ import { products } from '../catalog.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'docs');
 await mkdir(path.join(output, 'assets'), { recursive: true });
-const scripts=['api-client.js','member-store.js','privacy.js','access-log.js','payment-core.js','catalog-core.js','shipping-csv.js','platform.css','platform-core.js','supply-core.js','platform-client.js','ui-kit.js','storefront.js','admin.js','order.js','invoice-view.js','qr-code.js','line-login.js'];
+const scripts=['api-client.js','person.js','member-store.js','privacy.js','access-log.js','payment-core.js','catalog-core.js','shipping-csv.js','platform.css','platform-core.js','supply-core.js','platform-client.js','ui-kit.js','storefront.js','admin.js','order.js','invoice-view.js','qr-code.js','line-login.js'];
 for (const name of scripts) await copyFile(path.join(root,'dist',name),path.join(output,name));
 for(const page of ['index.html','shop.html','admin.html','order.html']){
 let html = await readFile(path.join(root, 'dist', page==='index.html'?'shop.html':page), 'utf8');

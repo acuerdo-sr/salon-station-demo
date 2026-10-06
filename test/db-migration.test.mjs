@@ -23,9 +23,9 @@ test('legacy single-JSON database is migrated into the new tables without losing
   try {
     // 旧形式を作る：ブラウザ版と同じ state に、会員・注文・店舗の追加と削除を加える
     const state = createPlatform(products, now);
-    const legacyMember = { id: 'old-member', salon: 'LUMIÈRE', name: '旧会員', email: 'old@example.test', kana: 'キュウ カイイン', phone: '090-0000-0000', gender: '2', birthday: '1990-01-01', createdAt: now, lineId: 'U-legacy' };
+    const legacyMember = { id: 'old-member', salon: 'LUMIÈRE', name: '旧 会員', email: 'old@example.test', kana: 'キュウ カイイン', phone: '090-0000-0000', gender: '2', birthday: '1990-01-01', createdAt: now, lineId: 'U-legacy' };
     platformRequest(state, '/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, { member: legacyMember }, now);
-    const placed = platformRequest(state, '/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'oil-smooth', quantity: 2, price: 2640 }], customer: { name: '旧会員', address: '架空県 9-9-9', postal: '0000000' } }, { member: legacyMember }, now);
+    const placed = platformRequest(state, '/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'oil-smooth', quantity: 2, price: 2640 }], customer: { name: '旧 会員', postal: '0000000', prefecture: '東京都', city: '架空市', street: '9-9-9', phone: '0300000000' } }, { member: legacyMember }, now);
     platformRequest(state, '/admin/salons', 'POST', { name: '閉店', owner: 'x', prefecture: '山口県', city: '萩市', street: '1', phone: '0838-00-0000' }, admin, now);
     platformRequest(state, '/admin/salons/S004', 'DELETE', {}, admin, now);
     const oilStock = state.products.find(p => p.id === 'oil-smooth').stock;
@@ -53,7 +53,7 @@ test('legacy single-JSON database is migrated into the new tables without losing
       // 旧パスワードでログインでき、旧セッションも使える
       const auth = createAuth(db), res = fakeRes();
       const login = await auth.request('/api/auth/login', 'POST', { email: 'old@example.test', password: 'Old-Password-2026' }, fakeReq(), res);
-      assert.equal(login.member.name, '旧会員'); assert.equal(login.member.kana, 'キュウ カイイン'); assert.equal(login.member.lineId, 'U-legacy'); assert.equal(login.member.salon, 'LUMIÈRE 表参道');
+      assert.equal(login.member.name, '旧 会員'); assert.equal(login.member.kana, 'キュウ カイイン'); assert.equal(login.member.lineId, 'U-legacy'); assert.equal(login.member.salon, 'LUMIÈRE 表参道');
       assert.equal((await auth.member(fakeReq(`salon_session=${token}`))).id, 'old-member');
       // 注文・在庫・担当店舗・採番がそのまま引き継がれる
       const member = { member: login.member };

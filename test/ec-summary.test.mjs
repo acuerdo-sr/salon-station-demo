@@ -5,13 +5,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators, jst } from '../dist/platform-core.js';
 import { memberRef } from '../dist/privacy.js';
+import { formatAddress } from '../dist/person.js';
 import { ecSummary, monthBefore } from '../dist/supply-core.js';
 import { engines } from './helpers/engines.mjs';
 
 const now = '2026-10-20T03:00:00.000Z', lastMonth = '2026-09-15T03:00:00.000Z';
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] };
 const atelierOp = { operator: { id: 'salon-atelier', role: 'salon', salonId: 'atelier', name: 'atelier 凪 店舗担当' } };
-const customer = { name: '個人 太郎', address: '秘密県 秘密市 9-8-7', postal: '1234567' };
+const customer = { name: '個人 太郎', postal: '1234567', prefecture: '東京都', city: '秘密市', street: '9-8-7', phone: '09012345678' };
+customer.address = formatAddress(customer);
 const line = (id, quantity, price) => ({ id, quantity, price });
 const order = (e, actor, items, salonId = 'lumiere', at = now) => e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId, items, customer }, actor, at);
 async function linked(e, id, salonId) { const actor = await e.member(id, customer.name); await e.call('/profile', 'PATCH', { salonId, staffId: '' }, actor); return actor; }
@@ -66,7 +68,7 @@ for (const [name, create] of engines(now)) {
   run('no customer details reach the order screen; past sales stay with the salon that sold them after a re-link', async e => {
     const { after, taro } = await scenario(e);
     const text = JSON.stringify(after);
-    for (const value of ['kojin-taro', memberRef(taro.member.id), customer.name, customer.address, customer.postal, '@example.test']) assert.ok(!text.includes(value), value);
+    for (const value of ['kojin-taro', memberRef(taro.member.id), customer.name, customer.address, customer.city, customer.postal, customer.phone, '@example.test']) assert.ok(!text.includes(value), value);
     const atelierBefore = await ecOf(e, atelierOp);
     await e.call(`/admin/members/${memberRef(taro.member.id)}`, 'PATCH', { salonId: 'atelier', staffId: '' }, admin, now);
     const lumiere = await ecOf(e), atelier = await ecOf(e, atelierOp);

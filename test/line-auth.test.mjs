@@ -33,7 +33,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
   const begin=async(cookie='',query='')=>{const r=await fetch(base+'/api/auth/line/start'+query,{redirect:'manual',headers:{Cookie:cookie}});assert.equal(r.status,302);const raw=r.headers.get('set-cookie');assert.match(raw,/salon_line_state=[0-9a-f]{32}; HttpOnly; SameSite=Lax; Path=\/api\/auth\/line/);const location=new URL(r.headers.get('location'));return {location,state:location.searchParams.get('state'),stateCookie:cookieOf(raw,'salon_line_state')};};
   // コールバック：LINEから戻ったブラウザが送る Cookie（state Cookie と、あればセッション）を付ける
   const finish=async(state,stateCookie='',session='')=>{const r=await fetch(base+`/api/auth/line/callback?code=good-code&state=${state}`,{headers:{Cookie:[stateCookie,session].filter(Boolean).join('; ')}});const raw=r.headers.get('set-cookie');return {status:r.status,html:await r.text(),cookie:cookieOf(raw,'salon_session'),raw};};
-  const orderInput=()=>({salonId:'lumiere',items:[{id:'shampoo-moist',price:2860,quantity:1}],customer:{name:'ライン 太郎',postal:'0000000',address:'架空県 1-2-3'},requestKey:crypto.randomUUID()});
+  const orderInput=()=>({salonId:'lumiere',items:[{id:'shampoo-moist',price:2860,quantity:1}],customer:{name:'ライン 太郎',postal:'0000000',prefecture:'東京都',city:'架空市',street:'1-2-3',phone:'0300000000'},requestKey:crypto.randomUUID()});
   let child;
   try{
     child=await startServer(port,dir,env);
@@ -58,7 +58,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal((await call('/auth/me','GET',undefined,again.cookie)).body.member.id,me.id);
     assert.equal((await call('/auth/login','POST',{email:me.email,password:'Demo-Member-2026'})).status,400);
     // 連携の乗っ取り防止：攻撃者が開始した連携URLを別のブラウザ（被害者）が完了しても、攻撃者の会員にLINEは連携されない
-    const mail=await call('/auth/register','POST',{name:'メール会員',kana:'メール カイイン',salon:'LUMIÈRE',email:'mail@example.test',password:'Demo-Member-2026',agreePrivacy:true});
+    const mail=await call('/auth/register','POST',{name:'メール 会員',kana:'メール カイイン',salon:'LUMIÈRE',email:'mail@example.test',password:'Demo-Member-2026',agreePrivacy:true});
     assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:''},mail.cookie)).status,200);
     const attackerFlow=await begin(mail.cookie);
     const hijack=await finish(attackerFlow.state,'');
@@ -91,7 +91,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     const input=orderInput();
     // LINEで簡略登録した会員は、フリガナを登録するまで注文できない（仕様書 2.6.2 フリガナ必須）
     assert.equal((await call('/platform/orders','POST',input,liff.cookie)).status,409);
-    assert.equal((await call('/auth/profile','PATCH',{name:'LINE会員',kana:'ライン カイイン',salon:'LUMIÈRE'},liff.cookie)).status,200);
+    assert.equal((await call('/auth/profile','PATCH',{name:'LINE 会員',kana:'ライン カイイン',salon:'LUMIÈRE'},liff.cookie)).status,200);
     const order=await call('/platform/orders','POST',input,liff.cookie);
     assert.equal(order.status,200);
     await until(()=>pushes.length>=1);
@@ -104,7 +104,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal(pushes[1].body.to,'U-liff');assert.ok(pushes[1].body.messages[0].text.includes('LINE-123'));
     assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'LINE-123'},admin.cookie)).status,200);
     // 未連携会員の注文は通知しない
-    const plain=await call('/auth/register','POST',{name:'未連携',kana:'ミレンケイ',salon:'LUMIÈRE',email:'plain@example.test',password:'Demo-Member-2026',agreePrivacy:true});
+    const plain=await call('/auth/register','POST',{name:'未連携 会員',kana:'ミレンケイ カイイン',salon:'LUMIÈRE',email:'plain@example.test',password:'Demo-Member-2026',agreePrivacy:true});
     await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:''},plain.cookie);
     assert.equal((await call('/platform/orders','POST',orderInput(),plain.cookie)).status,200);
     await new Promise(resolve=>setTimeout(resolve,300));assert.equal(pushes.length,2,JSON.stringify(pushes.map(p=>p.body.messages[0].text)));

@@ -8,7 +8,7 @@ import {validateMember} from '../dist/member-store.js';
 const now='2026-09-15T03:00:00.000Z'; // 12:00 JST
 const admin={operator:demoOperators[0]},salon={operator:demoOperators[1]},dealer={operator:demoOperators[2]};
 const member={id:'buyer-a',name:'デモ 花子',email:'a@example.test',kana:'デモ ハナコ',phone:'090-0000-0000',gender:'2',birthday:'1990-01-01'};
-const customer={name:'デモ 花子',address:'架空県 1-2-3',postal:'0000000'};
+const customer={name:'デモ 花子',postal:'0000000',prefecture:'東京都',city:'架空市',street:'1-2-3',phone:'0300000000'};
 function fixture(){const s=createPlatform(products,now);s.orders=[];s.purchaseOrders=[];s.profiles=[];s.events=[];s.products.forEach(p=>p.stock=products.find(x=>x.id===p.id).stock);platformRequest(s,'/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},{member},now);return s;}
 const order=(s,salonId='lumiere',items=[{id:'shampoo-moist',quantity:1,price:2860}],at=now,actor={member})=>platformRequest(s,'/orders','POST',{requestKey:crypto.randomUUID(),salonId,items,customer},actor,at);
 
@@ -26,21 +26,22 @@ test('closed site: guests get no products or quotes, members and operators do',(
 test('member profile carries the spec member fields and validation',()=>{
   const s=fixture();const p=platformRequest(s,'/profile','GET',undefined,{member});
   assert.equal(p.kana,'デモ ハナコ');assert.equal(p.phone,'090-0000-0000');assert.equal(p.gender,'2');assert.equal(p.birthday,'1990-01-01');
-  // フリガナは必須（仕様書 2.6.2）。LINEでの簡略登録だけはフリガナなしで作り、注文の前に登録してもらう
+  // フリガナは必須（仕様書 2.6.2）。LINEで簡略登録した会員は、注文の前に登録してもらう
   const base={salon:'デモ',name:'デモ 花子',email:'x@example.test'};
-  assert.throws(()=>validateMember(base),/フリガナを入力/);
-  assert.deepEqual(validateMember(base,{kanaRequired:false}),{...base,kana:'',phone:'',birthday:'',gender:''});
+  assert.throws(()=>validateMember(base),/フリガナ/);
+  assert.deepEqual(validateMember(base,{complete:false}),{...base,kana:'',phone:'',birthday:'',gender:''});
   assert.deepEqual(validateMember({...base,kana:'デモ ハナコ'}),{...base,kana:'デモ ハナコ',phone:'',birthday:'',gender:''});
-  assert.throws(()=>validateMember({...base,kana:'デモ',phone:'０９０'}),/電話番号/);
+  assert.throws(()=>validateMember({...base,kana:'デモ',phone:'０９０'}),/フリガナ/);
+  assert.throws(()=>validateMember({...base,kana:'デモ ハナコ',phone:'０９０'}),/電話番号/);
   assert.throws(()=>validateMember({...base,kana:'hanako'}),/フリガナ/);
-  assert.throws(()=>validateMember({...base,kana:'デモ',birthday:'1990-13-45'}),/生年月日/);
-  assert.throws(()=>validateMember({...base,kana:'デモ',gender:'3'}),/性別/);
+  assert.throws(()=>validateMember({...base,kana:'デモ ハナコ',birthday:'1990-13-45'}),/生年月日/);
+  assert.throws(()=>validateMember({...base,kana:'デモ ハナコ',gender:'3'}),/性別/);
   assert.equal(validateMember({...base,kana:'デモ ハナコ',gender:9}).gender,'9');
 });
 
 test('sales report aggregates by period and salon, excludes cancelled orders, scopes salon role',()=>{
   const s=fixture();
-  const other={id:'buyer-b',name:'別会員',kana:'ベツ カイイン',email:'b@example.test'};platformRequest(s,'/profile','PATCH',{salonId:'atelier',staffId:''},{member:other},now);
+  const other={id:'buyer-b',name:'別 会員',kana:'ベツ カイイン',email:'b@example.test'};platformRequest(s,'/profile','PATCH',{salonId:'atelier',staffId:''},{member:other},now);
   order(s,'lumiere',[{id:'shampoo-moist',quantity:2,price:2860}],'2026-09-14T15:30:00.000Z'); // 9/15 00:30 JST
   order(s,'lumiere',[{id:'oil-smooth',quantity:1,price:2640}],'2026-09-01T02:00:00.000Z');
   const c=order(s,'lumiere',[{id:'oil-smooth',quantity:1,price:2640}],'2026-09-02T02:00:00.000Z');platformRequest(s,'/orders/'+c.id+'/cancel','POST',{},{member},now);

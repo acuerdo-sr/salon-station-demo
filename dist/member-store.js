@@ -1,5 +1,6 @@
 // Demonstration membership. Pages storage is not a security boundary.
 import { privacyConsent } from './privacy.js';
+import { nameInput, kanaInput, phoneInput, isCompleteName, isCompleteKana } from './person.js';
 // セッションは最後の操作から30分で切れる（仕様書 3.1.2）。操作のたびに期限を延ばす。
 export const SESSION_IDLE = 30 * 60 * 1000;
 // Cookie の寿命（ブラウザ側の上限）。実際の有効期限はサーバーが最後の操作から30分で判定する。
@@ -9,24 +10,27 @@ const ITERATIONS = 600000;
 const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 const unhex = text => Uint8Array.from(text.match(/../g), pair => parseInt(pair, 16));
 
-// 会員のプロフィール（氏名・フリガナ・電話番号・性別・生年月日）。仕様書 2.6.2 でフリガナは必須。
-// LINEでの簡略登録だけはフリガナなしで作成し、注文の前にマイページで登録してもらう（kanaRequired: false）。
-export function validateProfile(input, { kanaRequired = true } = {}) {
+// 会員のプロフィール（氏名・フリガナ・電話番号・性別・生年月日）。入力のルールは person.js（姓・名、セイ・メイ、電話番号は数字だけ）。
+// 仕様書 2.6.2 でフリガナは必須。LINEでの簡略登録だけは LINE の表示名のまま作り（complete: false）、注文の前に姓・名とフリガナを登録してもらう。
+export function validateProfile(input, { complete = true } = {}) {
   const profile = {};
-  if (typeof input?.name !== 'string' || !input.name.trim() || input.name.trim().length > 80) throw Error('お名前を80文字以内で入力してください。');
-  profile.name = input.name.trim();
-  const optional = { kana: [50, /^[ぁ-んァ-ヶー・\s　]*$/, 'フリガナはかな・カナで50文字以内で入力してください。'], phone: [15, /^[0-9-]*$/, '電話番号は半角数字・ハイフンで15文字以内で入力してください。'], birthday: [10, /^(\d{4}-\d{2}-\d{2})?$/, '生年月日は YYYY-MM-DD 形式で入力してください。'] };
-  for (const [field, [max, pattern, message]] of Object.entries(optional)) {
-    const value = input?.[field] == null ? '' : String(input[field]).trim();
-    if (value.length > max || !pattern.test(value) || (field === 'birthday' && value && Number.isNaN(Date.parse(value)))) throw Error(message);
-    profile[field] = value;
+  if (complete) { profile.name = nameInput(input?.name); profile.kana = kanaInput(input?.kana); }
+  else {
+    const name = String(input?.name ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 40);
+    profile.name = name || 'LINE会員';
+    profile.kana = '';
   }
-  if (kanaRequired && !profile.kana.trim()) throw Error('フリガナを入力してください。');
+  profile.phone = phoneInput(input?.phone);
+  const birthday = input?.birthday == null ? '' : String(input.birthday).trim();
+  if (birthday && (!/^\d{4}-\d{2}-\d{2}$/.test(birthday) || Number.isNaN(Date.parse(birthday)) || birthday < '1900-01-01' || birthday > new Date().toISOString().slice(0, 10))) throw Error('生年月日を確認してください。');
+  profile.birthday = birthday;
   const gender = input?.gender == null ? '' : String(input.gender).trim();
   if (!['', '1', '2', '9'].includes(gender)) throw Error('性別の指定を確認してください。');
   profile.gender = gender;
   return profile;
 }
+// 注文できる会員：お名前（姓・名）とフリガナ（セイ・メイ）が登録されている
+export const profileComplete = member => isCompleteName(member?.name) && isCompleteKana(member?.kana);
 export function validateMember(input, options) {
   if (typeof input?.salon !== 'string' || !input.salon.trim() || input.salon.trim().length > 80) throw Error('サロン名・ご担当者名を80文字以内で入力してください。');
   const profile = { salon: input.salon.trim(), ...validateProfile(input, options) };
@@ -87,7 +91,7 @@ export function createMemberStore(storage, sessions, key, now = Date.now) {
     async request(route, method = 'GET', input) {
       if (route === '/auth/me' && method === 'GET') return { member: current() };
       if (route === '/auth/register' && method === 'POST') {
-        const profile = validateMember(input, { kanaRequired: true });
+        const profile = validateMember(input);
         validatePassword(input.password);
         const consent = privacyConsent(input);
         if (read().some(m => m.email === profile.email)) throw Error('このデモ用メールアドレスは登録済みです。ログインしてください。');
@@ -164,7 +168,7 @@ export function createMemberStore(storage, sessions, key, now = Date.now) {
         if (!active) throw Error('ログインし直してください。');
         const members = read();
         // 送られなかった項目は今の値のまま（部分更新）。メールアドレス（ログインID）は変えない
-        const profile = validateMember({ ...members.find(m => m.id === active.id), ...input, email: active.email }, { kanaRequired: true });
+        const profile = validateMember({ ...members.find(m => m.id === active.id), ...input, email: active.email });
         const index = members.findIndex(m => m.id === active.id);
         members[index] = { ...members[index], ...profile };
         write(members);

@@ -38,8 +38,8 @@ function splitBodyRequest(route, json, cookie) {
 test('server: closed store, member sessions, origin checks, UTF-8 bodies, login throttling and persistence', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-server-test-'));
   let child;
-  const details = email => ({ salon: 'テスト会員サロン', name: '会員担当', kana: 'カイイン タントウ', email, password: 'Demo-Member-2026', agreePrivacy: true });
-  const order = (items = [{ id: 'shampoo-moist', price: 2860, quantity: 1 }]) => ({ salonId: 'lumiere', items, customer: { name: 'デモ 花子', postal: '0000000', address: '架空県 1-2-3' }, requestKey: randomUUID() });
+  const details = email => ({ salon: 'テスト会員サロン', name: '会員 担当', kana: 'カイイン タントウ', email, password: 'Demo-Member-2026', agreePrivacy: true });
+  const order = (items = [{ id: 'shampoo-moist', price: 2860, quantity: 1 }]) => ({ salonId: 'lumiere', items, customer: { name: 'デモ 花子', postal: '0000000', prefecture: '東京都', city: '架空市', street: '1-2-3', phone: '0300000000' }, requestKey: randomUUID() });
   try {
     child = await start(dir);
     await t.test('guests cannot read prices; legacy endpoints are gone', async () => {
@@ -70,7 +70,7 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
       assert.equal((await call('/platform/orders', 'GET', undefined, cookieB)).body.length, 0);
       assert.equal((await call('/platform/profile', 'PATCH', { salonId: 'lumiere', staffId: '' }, cookieB)).status, 200);
       assert.equal((await call('/platform/orders', 'POST', input, cookieB)).status, 403);
-      const edit = await call('/auth/profile', 'PATCH', { salon: '変更サロン', name: '変更担当', email: 'forged@example.test' }, cookieA);
+      const edit = await call('/auth/profile', 'PATCH', { salon: '変更サロン', name: '変更 担当', email: 'forged@example.test' }, cookieA);
       assert.equal(edit.body.member.email, memberA.email);
       await call('/auth/logout', 'POST', {}, cookieA);
       assert.equal((await call('/auth/me', 'GET', undefined, cookieA)).body.member, null);
@@ -119,7 +119,7 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
         const rows = raw.prepare('SELECT email, name FROM members').all();
         assert.ok(rows.length >= 3 && rows.every(r => r.email.startsWith('enc:v1:') && r.name.startsWith('enc:v1:')));
         const text = JSON.stringify([rows, raw.prepare('SELECT ship_name, ship_address FROM orders').all()]);
-        for (const value of ['a@example.test', 'デモ 花子さん', '架空県 1-2-3']) assert.ok(!text.includes(value), value);
+        for (const value of ['a@example.test', 'デモ 花子さん', '架空市']) assert.ok(!text.includes(value), value);
       } finally { raw.close(); }
       const salonLogin = await call('/platform/operator/login', 'POST', { email: 'salon@example.test', password: 'Demo-Admin-2026' });
       const salonSnap = (await call('/platform/admin/snapshot', 'GET', undefined, salonLogin.cookie.split(';')[0])).body;
@@ -151,7 +151,7 @@ test('server: behind a trusted proxy the client address comes from X-Forwarded-F
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-server-proxy-'));
   const child = await start(dir, { TRUST_PROXY: '1', PUBLIC_ORIGIN: 'https://shop.example.test', DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') });
   try {
-    const register = await call('/auth/register', 'POST', { salon: 'x', name: 'x', kana: 'エックス', email: 'p@example.test', password: 'Demo-Member-2026', agreePrivacy: true });
+    const register = await call('/auth/register', 'POST', { salon: 'x', name: 'テスト 会員', kana: 'テスト カイイン', email: 'p@example.test', password: 'Demo-Member-2026', agreePrivacy: true });
     assert.match(register.cookie, /Secure/);
     const from = ip => ({ 'X-Forwarded-For': ip });
     for (let i = 0; i < 10; i++) await call('/auth/login', 'POST', { email: 'p@example.test', password: 'bad-password-' + i }, '', from('203.0.113.1'));

@@ -5,11 +5,12 @@ import {
   fail, required, int, salonInput, staffList, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
   settlement, requireOperator, allowedOrder, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
-  addressInput, sortAddresses, addressView, cardView, sortCards, MAX_ADDRESSES,
+  addressInput, sortAddresses, addressView, cardView, sortCards, shipmentLabel, MAX_ADDRESSES,
 } from '../dist/platform-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from '../dist/payment-core.js';
-import { validateProfile } from '../dist/member-store.js';
-import { productInput, categoryInput, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES } from '../dist/catalog-core.js';
+import { validateProfile, profileComplete } from '../dist/member-store.js';
+import { encodeAddress, decodeAddress } from '../dist/person.js';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES } from '../dist/catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from '../dist/shipping-csv.js';
 import { ISSUER, salonAddress } from '../dist/supply-core.js';
 import { schemaTable } from './adapter.mjs';
@@ -81,11 +82,11 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const r = openRow(c, 'orders', o.row);
     const view = {
       id: r.id, createdAt: r.created_at, memberId: r.member_id, salonId: r.salon_id, salonName: r.salon_name, seller: r.seller, staffId: r.staff_id, staffName: r.staff_name,
-      customer: { name: r.ship_name, address: r.ship_address, postal: r.ship_postal, phone: r.ship_phone || '', email: r.ship_email },
+      customer: { name: r.ship_name, postal: r.ship_postal, ...decodeAddress(r.ship_address), phone: r.ship_phone || '', email: r.ship_email },
       items: o.items.map(i => itemFrom(i, admin)), subtotal: num(r.subtotal), shipping: num(r.shipping), total: num(r.total), taxTotal: num(r.tax_total),
       paymentMethod: r.payment_method, paymentStatus: r.payment_status,
       status: r.status, payment: paymentLabel(r.payment_method, r.payment_status), timeline: o.events.map(e => ({ at: e.occurred_at, label: e.label })),
-      shipments: o.pos.map(p => ({ id: p.id, dealerId: p.dealer_id, dealerName: dealers.find(d => d.id === p.dealer_id)?.name, status: p.status, carrier: p.carrier, tracking: p.tracking, shippedAt: p.shipped_at || undefined, items: o.items.filter(i => i.purchase_order_id === p.id).map(i => ({ id: i.product_id, name: i.name, quantity: num(i.quantity) })) })),
+      shipments: o.pos.map(p => ({ id: p.id, ...(admin ? { dealerId: p.dealer_id, dealerName: dealers.find(d => d.id === p.dealer_id)?.name } : {}), status: p.status, carrier: p.carrier, tracking: p.tracking, shippedAt: p.shipped_at || undefined, items: o.items.filter(i => i.purchase_order_id === p.id).map(i => ({ id: i.product_id, name: i.name, quantity: num(i.quantity) })) })),
     };
     if (r.return_reason) view.returnReason = r.return_reason;
     if (bool(r.is_sample)) view.sample = true;
@@ -106,7 +107,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
   const event = (q, orderId, label, now) => q.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [orderId, now, label]);
   const memberRow = async (q, id) => openRow(c, 'members', await q.get('SELECT * FROM members WHERE id=?', [id]));
   // 住所録・登録カード
-  const addressFrom = r => ({ id: String(r.id), name: r.name, postal: r.postal, address: r.address, phone: r.phone || '', isDefault: bool(r.is_default), updatedAt: r.updated_at });
+  // 住所の列には都道府県・市区町村・番地・建物名を JSON で保存している（dist/person.js）
+  const addressFrom = r => ({ id: String(r.id), name: r.name, postal: r.postal, ...decodeAddress(r.address), phone: r.phone || '', isDefault: bool(r.is_default), updatedAt: r.updated_at });
   const addressList = async (q, memberId) => sortAddresses((await q.all('SELECT * FROM member_addresses WHERE member_id=?', [memberId])).map(r => addressFrom(openRow(c, 'member_addresses', r)))).map(addressView);
   const addressRow = async (q, memberId, id) => /^\d+$/.test(String(id)) ? openRow(c, 'member_addresses', await q.get('SELECT * FROM member_addresses WHERE id=? AND member_id=?', [Number(id), memberId])) : null;
   const cardRow = async (q, memberId, id) => { const r = await q.get('SELECT * FROM member_cards WHERE id=? AND member_id=?', [String(id), memberId]); return r && { ...r, token: c.decrypt(r.token) }; };
@@ -161,7 +163,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const m = await memberRow(q, member.id);
     if (!m?.salon_id || m.salon_id !== input.salonId) fail('マイページでご利用サロンを確認してください。', 409);
     // 会員マスタのフリガナは必須（LINEで簡略登録した会員は、注文の前にマイページで登録する）
-    if (!String(m.kana || '').trim()) fail('マイページでフリガナを登録してから、ご注文ください。', 409);
+    if (!profileComplete(m)) fail('マイページでお名前（姓・名）とフリガナを登録してから、ご注文ください。', 409);
     const saved = input?.addressId != null ? (await addressRow(q, m.id, input.addressId)) || fail('お届け先が見つかりません。', 404) : null;
     const customer = orderCustomer(input, m, saved), pay = paymentInput(input);
     const qt = await quote(q, input), salon = await salonById(q, input.salonId);
@@ -184,7 +186,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       payment_method, status, payment_status, ship_name, ship_postal, ship_address, ship_phone, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'card', 'ordered', 'captured', ?, ?, ?, ?, ?, NULL, 0, 0, ?, ?, ?)`,
     [id, key, fingerprint, m.id, salon.id, salon.name, salon.owner, staff?.id || '', staff?.name || '指名なし', salon.feeRate, feeOf(qt.subtotal, salon.feeRate), qt.subtotal, qt.shipping, qt.total, includedTax(qt.total),
-      ...[customer.name, customer.postal, customer.address, customer.phone, customer.email].map(c.encrypt), jst(now).slice(0, 10), now, now]);
+      ...[customer.name, customer.postal, encodeAddress(customer), customer.phone, customer.email].map(c.encrypt), jst(now).slice(0, 10), now, now]);
     const dealers = [...new Set(qt.items.map(i => i.dealerId))];
     for (const [index, dealerId] of dealers.entries()) {
       const items = qt.items.filter(i => i.dealerId === dealerId), shipping = index === 0 ? qt.shipping : 0, poId = purchaseOrderId(id, index);
@@ -194,7 +196,6 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
         [id, poId, qt.items.indexOf(item) + 1, item.id, item.sku, item.name, item.size, item.image, item.price, item.cost, item.quantity, dealerId]);
     }
     await event(q, id, ORDER_PLACED_LABEL, now);
-    await event(q, id, 'ディーラーへ自動発注しました', now);
     await q.run("INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'captured', ?, ?)", [id, charge.provider, charge.id, qt.total, now, now]);
     await q.run('DELETE FROM cart_items WHERE member_id=?', [m.id]);
     // お届け先：住所録が空なら今回のお届け先を登録する。「保存する」を選んだ場合も追加する（10件まで）
@@ -202,7 +203,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     if (!saved && (!book.length || input?.saveAddress === true) && book.length < MAX_ADDRESSES) {
       const makeDefault = !book.length || input?.saveAsDefault === true;
       if (makeDefault) await q.run('UPDATE member_addresses SET is_default=0 WHERE member_id=?', [m.id]);
-      await q.run('INSERT INTO member_addresses (member_id, name, postal, address, phone, is_default, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [m.id, ...[customer.name, customer.postal, customer.address, customer.phone].map(c.encrypt), makeDefault ? 1 : 0, now]);
+      await q.run('INSERT INTO member_addresses (member_id, name, postal, address, phone, is_default, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [m.id, ...[customer.name, customer.postal, encodeAddress(customer), customer.phone].map(c.encrypt), makeDefault ? 1 : 0, now]);
     }
     await audit(q, member, '受注・仕入先への自動発注', id, now);
     effects.push({ type: 'order_placed', orderId: id, memberId: m.id });
@@ -268,7 +269,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       products: await loadProducts(q, { dealerId: op.role === 'dealer' ? op.dealerId : undefined, withCost: true }),
       salons, dealers,
       orders: views.map(o => orderForRole(op.role, o)),
-      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: o.ship_address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
+      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: decodeAddress(o.ship_address).address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
       categories: op.role === 'admin' ? await categoryList(q) : [], concernNames: await concernList(q),
       profiles: members.map(m => ({ ...profileFrom(m), ref: memberRef(m.id) })),
       customerStats: op.role === 'dealer' ? [] : await customerStats(q, salons, now),
@@ -296,6 +297,13 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       rows = perPeriod.map(p => String(p.period)).sort().map(period => ({ period, salons: salons.map(s => ({ salonId: s.id, salonName: s.name, ...summary(perSalonPeriod.find(r => r.salon_id === s.id && String(r.period) === period)) })), total: summary(perPeriod.find(r => String(r.period) === period)) }));
     } else rows = total.orders ? [{ period: `${from}〜${to}`, salons: salons.map(s => ({ salonId: s.id, salonName: s.name, ...summary(perSalon.find(r => r.salon_id === s.id)) })), total }] : [];
     return { from, to, unit, unitName: salesUnits[unit], rows, salons: salons.map(s => ({ salonId: s.id, salonName: s.name, ...summary(perSalon.find(r => r.salon_id === s.id)) })), total };
+  }
+  // 商品コードの自動採番（P-00001 の形）。番号は counters の product_seq に残す
+  async function nextProductSku(q) {
+    const row = await q.get("SELECT value FROM counters WHERE name='product_seq'");
+    const { sku, seq } = nextSku(num(row?.value), (await q.all("SELECT sku FROM products WHERE sku LIKE 'P-%'")).map(r => r.sku));
+    await q.run(row ? "UPDATE counters SET value=? WHERE name='product_seq'" : "INSERT INTO counters (name, value) VALUES ('product_seq', ?)", [seq]);
+    return sku;
   }
   async function nextSalonId(q) {
     let n = num((await q.get("SELECT value FROM counters WHERE name='salon_seq'"))?.value) + 1, id;
@@ -339,14 +347,14 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
         if (count >= MAX_ADDRESSES) fail(`お届け先は${MAX_ADDRESSES}件まで登録できます。`, 409);
         const a = addressInput(input), isDefault = !count || input?.isDefault === true;
         if (isDefault) await q.run('UPDATE member_addresses SET is_default=0 WHERE member_id=?', [memberId]);
-        await q.run('INSERT INTO member_addresses (member_id, name, postal, address, phone, is_default, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [memberId, ...[a.name, a.postal, a.address, a.phone].map(c.encrypt), isDefault ? 1 : 0, now]);
+        await q.run('INSERT INTO member_addresses (member_id, name, postal, address, phone, is_default, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [memberId, ...[a.name, a.postal, encodeAddress(a), a.phone].map(c.encrypt), isDefault ? 1 : 0, now]);
         return addressList(q, memberId);
       }
       const row = await addressRow(q, memberId, route.split('/')[2]);
       if (!row) fail('お届け先が見つかりません。', 404);
       if (method === 'PATCH') {
-        const a = addressInput({ name: row.name, postal: row.postal, address: row.address, phone: row.phone, ...input });
-        await q.run('UPDATE member_addresses SET name=?, postal=?, address=?, phone=?, updated_at=? WHERE id=?', [...[a.name, a.postal, a.address, a.phone].map(c.encrypt), now, row.id]);
+        const a = addressInput({ ...addressFrom(row), ...input });
+        await q.run('UPDATE member_addresses SET name=?, postal=?, address=?, phone=?, updated_at=? WHERE id=?', [...[a.name, a.postal, encodeAddress(a), a.phone].map(c.encrypt), now, row.id]);
         if (input?.isDefault === true) await q.run('UPDATE member_addresses SET is_default=CASE WHEN id=? THEN 1 ELSE 0 END WHERE member_id=?', [row.id, memberId]);
         return addressList(q, memberId);
       }
@@ -457,8 +465,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       else await q.run(`UPDATE purchase_orders SET status=?, ${input.status === 'delivered' ? 'delivered_at=?, ' : ''}updated_at=? WHERE id=?`, input.status === 'delivered' ? [input.status, now, now, po.id] : [input.status, now, po.id]);
       const all = await q.all('SELECT status FROM purchase_orders WHERE order_id=?', [order.id]), nextStatus = orderStatusFrom(all.map(p => p.status));
       await q.run('UPDATE orders SET status=?, updated_at=? WHERE id=?', [nextStatus, now, order.id]);
-      const dealer = await q.get('SELECT short_name FROM dealers WHERE id=?', [po.dealer_id]);
-      await event(q, order.id, `${dealer.short_name}：${poStatuses[input.status]}`, now);
+      await event(q, order.id, shipmentLabel(input.status, num(po.seq), all.length), now);
       await audit(q, op, poStatuses[input.status], po.id, now);
       if (input.status === 'shipped') effects.push({ type: 'shipped', purchaseOrderId: po.id, orderId: order.id, memberId: order.member_id });
       return poView(await q.get('SELECT * FROM purchase_orders WHERE id=?', [po.id]), await items());
@@ -480,7 +487,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     // 商品登録・編集（仕様書 2.1.1）。本部は全項目と画像、ディーラーは在庫数だけ
     if (route === '/admin/products' && method === 'POST') {
       const op = requireOperator(actor, ['admin']), fields = productInput(input, await catalogContext(q));
-      if (await q.get('SELECT id FROM products WHERE sku=?', [fields.sku])) fail('この商品コード（SKU）は登録済みです。', 409);
+      fields.sku = await nextProductSku(q);
       const id = newProductId(), image = input?.imageData ? saveImage(input.imageData) : '', sort = num((await q.get('SELECT MAX(sort_order) AS n FROM products'))?.n) + 1;
       await q.run('INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)',
         [id, fields.sku, fields.brand, fields.name, fields.categoryId, fields.size, fields.description, image, fields.tag, fields.price, fields.cost, fields.wholesalePrice, fields.dealerId, fields.stock, fields.enabled ? 1 : 0, sort, now]);
@@ -497,10 +504,9 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       let stock;
       if (op.role === 'admin') {
         const ctx = await catalogContext(q), u = productInput({ ...p, categoryId: ctx.categories.find(x => x.name === p.category)?.id, ...input }, ctx);
-        if (await q.get('SELECT id FROM products WHERE sku=? AND id<>?', [u.sku, p.id])) fail('この商品コード（SKU）は登録済みです。', 409);
         const image = input?.imageData ? saveImage(input.imageData) : p.image;
-        await q.run('UPDATE products SET sku=?, brand=?, name=?, category_id=?, size=?, description=?, image=?, tag=?, price=?, cost=?, wholesale_price=?, dealer_id=?, stock=?, enabled=?, updated_at=? WHERE id=?',
-          [u.sku, u.brand, u.name, u.categoryId, u.size, u.description, image, u.tag, u.price, u.cost, u.wholesalePrice, u.dealerId, u.stock, u.enabled ? 1 : 0, now, p.id]);
+        await q.run('UPDATE products SET brand=?, name=?, category_id=?, size=?, description=?, image=?, tag=?, price=?, cost=?, wholesale_price=?, dealer_id=?, stock=?, enabled=?, updated_at=? WHERE id=?',
+          [u.brand, u.name, u.categoryId, u.size, u.description, image, u.tag, u.price, u.cost, u.wholesalePrice, u.dealerId, u.stock, u.enabled ? 1 : 0, now, p.id]);
         await saveConcerns(q, p.id, u.concerns);
         stock = u.stock;
       } else {
@@ -511,6 +517,19 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (stock !== p.stock) await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'adjust', '', ?, ?)", [p.id, stock - p.stock, op.name, now]);
       await audit(q, op, '商品・在庫を更新', p.sku, now);
       return (await loadProducts(q, { ids: [p.id], withCost: true }))[0];
+    }
+    // 価格の一括更新（管理画面の価格一括編集）。すべての行を確かめてから保存する（1つでも誤りがあれば何も変えない）
+    if (route === '/admin/product-prices' && method === 'PATCH') {
+      const op = requireOperator(actor, ['admin']), rows = priceRowsInput(input), current = await loadProducts(q, { ids: rows.map(r => r.id), withCost: true });
+      const updates = rows.map(r => { const p = current.find(x => x.id === r.id) || fail('商品が見つかりません。画面を読み込み直してください。', 404); return [p, applyPriceRow(r, p)]; });
+      let updated = 0;
+      for (const [p, u] of updates) {
+        if (!u.changed.length) continue;
+        await q.run('UPDATE products SET price=?, cost=?, wholesale_price=?, updated_at=? WHERE id=?', [u.price, u.cost, u.wholesalePrice, now, p.id]);
+        await audit(q, op, `価格を一括更新（${u.summary}）`, p.sku, now);
+        updated++;
+      }
+      return { updated };
     }
     // カテゴリ管理（仕様書 2.1.1）。商品が登録されているカテゴリは削除できない
     if (route === '/admin/categories' && method === 'POST') {
@@ -560,7 +579,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
         for (const salonId of salonIds) await recordAccess(q, { actorId: op.id || '', actorName: op.name, role: accessRoles.dealer, salonId, action: accessActions.export, target: accessTargets.shippingCsv, count: new Set(rows.filter(p => p.salon_id === salonId).map(p => p.member_id)).size, ip: actor.ip }, now);
         const items = await q.all(`SELECT purchase_order_id, name, quantity FROM order_items WHERE purchase_order_id IN (${marks(ids)}) ORDER BY line_no`, ids);
         return { filename, columns: SHIPPING_COLUMNS, rows: rows.map(p => { const o = openRow(c, 'orders', p), salon = salons.find(s => s.id === p.salon_id);
-          return shippingRow({ reference: p.id, to: { name: o.ship_name, postal: o.ship_postal, address: o.ship_address, phone: o.ship_phone }, from: { name: salon.name, postal: '', address: salonAddress(salon), phone: salon.phone }, items: items.filter(i => i.purchase_order_id === p.id).map(i => ({ name: i.name, quantity: num(i.quantity) })), note: `注文 ${p.order_id}` }); }) };
+          return shippingRow({ reference: p.id, to: { name: o.ship_name, postal: o.ship_postal, ...decodeAddress(o.ship_address), phone: o.ship_phone }, from: { name: salon.name, postal: '', address: salonAddress(salon), phone: salon.phone }, items: items.filter(i => i.purchase_order_id === p.id).map(i => ({ name: i.name, quantity: num(i.quantity) })), note: `注文 ${p.order_id}` }); }) };
       }
       requireOperator(actor, ['admin']);
       const found = await supply.loadOrders(q, `id IN (${marks(ids)})`, ids);
@@ -751,7 +770,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (matches.length !== 1) fail('会員番号に該当する会員が見つかりません。', 404);
       const m = await memberRow(db, matches[0].id);
       await recordAccess(db, { actorId: `maintenance:${by}`, actorName: by, role: accessRoles.maintenance, salonId: m.salon_id || '', action: accessActions.lookup, target: accessTargets.member, count: 1, refs: ref, purpose, channel: accessChannels.maintenance }, now);
-      const address = openRow(c, 'member_addresses', await db.get('SELECT name, postal, address FROM member_addresses WHERE member_id=? AND is_default=1', [m.id]));
+      const row = openRow(c, 'member_addresses', await db.get('SELECT name, postal, address FROM member_addresses WHERE member_id=? AND is_default=1', [m.id]));
+      const address = row && { name: row.name, postal: row.postal, ...decodeAddress(row.address) };
       const { id, ...profile } = profileFrom(m);
       return { ref, ...profile, address: address || null, orders: num((await db.get('SELECT COUNT(*) AS n FROM orders WHERE member_id=?', [m.id])).n) };
     },

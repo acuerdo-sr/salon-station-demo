@@ -3,11 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
+import { formatAddress } from '../dist/person.js';
 import { engines as createEngines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z';
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
-const customer = { name: 'デモ 花子', address: '架空県 1-2-3', postal: '0000000' };
+const customer = { name: 'デモ 花子', postal: '0000000', prefecture: '東京都', city: '架空市', street: '1-2-3', phone: '0300000000' };
+customer.address = formatAddress(customer);
 // ブラウザ版・SQLite（・MySQL）の作り方は helpers/engines.mjs に共通化（DB版は個人情報を暗号化して保存）
 const engines = createEngines(now);
 const line = (id, quantity, price) => ({ id, quantity, price });
@@ -71,7 +73,7 @@ for (const [name, create] of engines) {
     await move(botanica, botanicaPo, 'accepted'); await move(botanica, botanicaPo, 'shipped');
     await move(sena, senaPo, 'delivered'); await move(botanica, botanicaPo, 'delivered');
     const mine = (await e.call('/orders', 'GET', undefined, a))[0];
-    assert.equal(mine.status, 'delivered'); assert.ok(mine.shipments.every(s => s.tracking === 'DEMO-1')); assert.equal(mine.timeline.length, 8);
+    assert.equal(mine.status, 'delivered'); assert.ok(mine.shipments.every(s => s.tracking === 'DEMO-1')); assert.equal(mine.timeline.length, 7); assert.ok(mine.timeline.every(t => !/SENA|BOTANICA|ディーラー/.test(t.label)), 'お客様の履歴に仕入先を出さない'); assert.ok(mine.shipments.every(s => s.dealerId === undefined && s.dealerName === undefined));
     await assert.rejects(e.call('/orders/' + o.id + '/return', 'POST', { reason: '' }, a), /入力内容/);
     assert.equal((await e.call('/orders/' + o.id + '/return', 'POST', { reason: 'デモ：返品テスト' }, a)).status, 'return_requested');
     await assert.rejects(e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, sena), /権限/);
@@ -191,7 +193,7 @@ for (const [name, create] of engines) {
       assert.equal((await e.db.get('SELECT status FROM payments WHERE order_id=?', [placed.id])).status, 'captured');
       // お届け先は暗号化して保存される
       const stored = (await e.db.get("SELECT address FROM member_addresses WHERE member_id=?", [placed.memberId])).address;
-      assert.match(stored, /^enc:v1:/); assert.equal(e.fieldCrypto.decrypt(stored), customer.address);
+      assert.match(stored, /^enc:v1:/); assert.deepEqual(JSON.parse(e.fieldCrypto.decrypt(stored)), { prefecture: '東京都', city: '架空市', street: '1-2-3', building: '' });
       assert.equal((await e.call('/profile', 'GET', undefined, placed.memberId === 'a' ? a : b)).address.postal, '0000000');
       assert.equal(await e.store.claimNotification('a', 'line', 'order_placed', placed.id), true);
       assert.equal(await e.store.claimNotification('a', 'line', 'order_placed', placed.id), false);

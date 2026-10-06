@@ -1,8 +1,9 @@
 // Shared business rules for the local server and the browser-only public demo.
 import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js';
-import { validateProfile } from './member-store.js';
-import { productInput, categoryInput, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES } from './catalog-core.js';
+import { validateProfile, profileComplete } from './member-store.js';
+import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES } from './catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js';
 import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js';
 import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js';
@@ -103,7 +104,7 @@ export function createPlatform(catalog,now=new Date().toISOString()){
     const member={id:'sample-member-'+i,name:['デモ 花子','デモ 美咲','デモ 葵'][i%3],kana:['デモ ハナコ','デモ ミサキ','デモ アオイ'][i%3],email:`sample-${i}@example.test`};
     const when=new Date(new Date(now).getTime()-i*86400000-3600000).toISOString();
     state.profiles.push({...member,phone:'',gender:'',birthday:'',lineLinked:false,salonId:salon.id,staffId:salon.staff[0].id,createdAt:when});
-    const order=placeOrder(state,{salonId:salon.id,items:[{id:product.id,quantity:1,price:product.price}],customer:{name:member.name,address:'デモ県サンプル市 1-2-3',postal:'0000000'},requestKey:crypto.randomUUID()},{member},when);
+    const order=placeOrder(state,{salonId:salon.id,items:[{id:product.id,quantity:1,price:product.price}],customer:{name:member.name,postal:'1000001',prefecture:'東京都',city:'サンプル市',street:'1-2-3',phone:'0300000000'},requestKey:crypto.randomUUID()},{member},when);
     order.sample=true;order.createdAt=when;
     if(i>0){state.purchaseOrders.filter(p=>p.orderId===order.id).forEach(p=>{p.status=i<3?'accepted':i<5?'shipped':'delivered';if(i>=3){p.tracking='DEMO-'+String(100000+i);p.carrier='デモ配送';p.shippedAt=when;}});refreshOrder(state,order);}
   }
@@ -134,19 +135,25 @@ export const orderFingerprint=input=>JSON.stringify({salonId:input?.salonId,item
 export function requestKeyOf(input){const key=required(input?.requestKey,80);if(!/^[a-f0-9-]{36}$/i.test(key))fail('注文番号の形式が正しくありません。');return key;}
 // お届け先（住所録・注文で共通）。電話番号は配送伝票（出荷指示CSV）に使う
 export const MAX_ADDRESSES=10;
-export function addressInput(input){const a={name:required(input?.name,80),postal:required(input?.postal,8),address:required(input?.address,250),phone:optional(input?.phone,15)};if(!/^\d{3}-?\d{4}$/.test(a.postal))fail('郵便番号を7桁で入力してください。');const digits=a.phone.replace(/-/g,'');if(a.phone&&(!/^[0-9-]+$/.test(a.phone)||digits.length<10||digits.length>11))fail('電話番号を確認してください。');return a;}
-// 注文のお届け先：住所録から選んだもの（saved）か、入力したもの。電話番号がなければ会員の電話番号を使う
-export function orderCustomer(input,member,saved){const a=saved||addressInput(input?.customer);return {name:a.name,postal:a.postal,address:a.address,phone:a.phone||member.phone||'',email:member.email};}
+// 項目の形式は person.js（お名前は姓・名、郵便番号7桁、都道府県・市区町村・番地・建物名、電話番号は数字だけ）
+export function addressInput(input){return {name:nameInput(input?.name,'お届け先のお名前'),postal:postalInput(input?.postal),...addressPartsInput(input),phone:phoneInput(input?.phone,{required:true})};}
+// 注文のお届け先：住所録から選んだもの（saved）か、入力したもの。address は表示用につないだ住所
+export function orderCustomer(input,member,saved){const a=saved?addressView(saved):addressInput(input?.customer);return {name:a.name,postal:a.postal,prefecture:a.prefecture,city:a.city,street:a.street,building:a.building||'',address:formatAddress(a)||a.address,phone:a.phone,email:member.email};}
 export const sortAddresses=list=>[...list].sort((a,b)=>Number(Boolean(b.isDefault))-Number(Boolean(a.isDefault))||String(b.updatedAt).localeCompare(String(a.updatedAt))||String(a.id).localeCompare(String(b.id)));
-export const addressView=a=>({id:String(a.id),name:a.name,postal:a.postal,address:a.address,phone:a.phone||'',isDefault:Boolean(a.isDefault),updatedAt:a.updatedAt});
+// 以前の版の住所（1つの文字列）は decodeAddress で読む
+export const addressView=a=>{const parts=a.prefecture!==undefined?{prefecture:a.prefecture,city:a.city,street:a.street,building:a.building||'',address:formatAddress(a)}:decodeAddress(a.address);return {id:String(a.id),name:a.name,postal:a.postal,...parts,phone:a.phone||'',isDefault:Boolean(a.isDefault),updatedAt:a.updatedAt};};
 // 登録カードの並び：登録した順（同じ時刻なら下4桁の順）。ブラウザ版と DB版で同じ並びにする
 export const sortCards=list=>[...list].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||String(a.last4).localeCompare(String(b.last4))||String(a.id).localeCompare(String(b.id)));
 export const cardView=c=>({id:c.id,brand:c.brand,last4:c.last4,expMonth:Number(c.expMonth),expYear:Number(c.expYear),isDefault:Boolean(c.isDefault)});
 
 export const newOrderId=now=>'SS-'+now.slice(2,10).replaceAll('-','')+'-'+crypto.randomUUID().slice(0,5).toUpperCase();
 export const purchaseOrderId=(orderId,index)=>'PO-'+orderId.slice(3)+'-'+(index+1);
+// 1件の注文のお届け（発注）を、お届け1・2…の順に並べる（DB版の seq と同じ順）
+const orderPos=(state,orderId)=>state.purchaseOrders.filter(p=>p.orderId===orderId).sort((a,b)=>Number(a.id.split('-').pop())-Number(b.id.split('-').pop()));
 export const feeOf=(subtotal,feeRate)=>Math.round(subtotal*feeRate/100);
 export const PO_TRANSITIONS={pending:'accepted',accepted:'shipped',shipped:'delivered'};
+// 注文の履歴に残す言葉（お客様にも見える）。2回以上に分けてお届けする場合は「お届け1/2：」を付ける
+export const shipmentLabel=(status,seq,count)=>`${count>1?`お届け${seq}/${count}：`:''}${{accepted:'発送の準備を始めました',shipped:'商品を発送しました',delivered:'お届けしました'}[status]}`;
 // 注文の状態は、仕入先別の発注の状態から決まる（キャンセル・返品系は別管理）。
 export function orderStatusFrom(poStatusList){const all=s=>poStatusList.every(p=>s.includes(p)),some=s=>poStatusList.some(p=>s.includes(p));return all(['delivered'])?'delivered':all(['shipped','delivered'])?'shipped':some(['shipped','delivered'])?'partially_shipped':some(['accepted'])?'processing':'ordered';}
 export function validateTracking(input){const tracking=required(input?.tracking,60);if(!/^[A-Za-z0-9-]+$/.test(tracking))fail('追跡番号は半角英数字・ハイフンで入力してください。');return {tracking,carrier:required(input?.carrier,40)};}
@@ -165,7 +172,7 @@ function placeOrder(state,input,actor,now,effects=[]){
   if(old){if(old.memberId!==member.id)fail('この注文は取得できません。',403);if(old.fingerprint!==fingerprint)fail('同じ注文番号で内容を変更できません。カートを確認してください。',409);return old;}
   const profile=currentProfile(state,member);if(!profile||profile.salonId!==input.salonId)fail('マイページでご利用サロンを確認してください。',409);
   // 会員マスタのフリガナは必須（LINEで簡略登録した会員は、注文の前にマイページで登録する）
-  if(!String(member.kana||'').trim())fail('マイページでフリガナを登録してから、ご注文ください。',409);
+  if(!profileComplete(member))fail('マイページでお名前（姓・名）とフリガナを登録してから、ご注文ください。',409);
   const book=addressBook(state,member.id),saved=input?.addressId!=null?book.find(a=>a.id===String(input.addressId))||fail('お届け先が見つかりません。',404):null;
   const customer=orderCustomer(input,member,saved),pay=paymentInput(input);
   const q=quote(state,input),salon=salonFor(state,input.salonId),staff=salon.staff.find(s=>s.id===profile.staffId);
@@ -174,10 +181,10 @@ function placeOrder(state,input,actor,now,effects=[]){
   // カード決済：登録済みカード・新しいカード（トークン）・トークンなし（テスト決済）のどれか。承認されなければ注文は作らない
   const card=pay.cardId?cardList(state,member.id).find(c=>c.id===pay.cardId)||fail('登録済みのカードが見つかりません。',404):pay.card;
   testCharge(card?.token||'tok_test_'+crypto.randomUUID().replace(/-/g,'').slice(0,20),q.total);if(pay.saveCard)saveCard(state,member.id,pay.card,now);
-  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,paymentMethod:'card',paymentStatus:'captured',status:'ordered',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:ORDER_PLACED_LABEL},{at:now,label:'ディーラーへ自動発注しました'}]};
+  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,paymentMethod:'card',paymentStatus:'captured',status:'ordered',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:ORDER_PLACED_LABEL}]};
   state.orders.unshift(order);
   // お届け先：住所録が空なら今回のお届け先を登録する。「保存する」を選んだ場合も追加する（10件まで）
-  if(!saved&&(!book.length||input?.saveAddress===true)&&book.length<MAX_ADDRESSES){if(!book.length||input?.saveAsDefault===true)book.forEach(a=>{a.isDefault=false;});book.push({id:'ad-'+crypto.randomUUID().slice(0,8),name:customer.name,postal:customer.postal,address:customer.address,phone:customer.phone,isDefault:!book.length||input?.saveAsDefault===true,updatedAt:now});}
+  if(!saved&&(!book.length||input?.saveAddress===true)&&book.length<MAX_ADDRESSES){if(!book.length||input?.saveAsDefault===true)book.forEach(a=>{a.isDefault=false;});book.push({id:'ad-'+crypto.randomUUID().slice(0,8),name:customer.name,postal:customer.postal,prefecture:customer.prefecture,city:customer.city,street:customer.street,building:customer.building,phone:customer.phone,isDefault:!book.length||input?.saveAsDefault===true,updatedAt:now});}
   const groups=[...new Set(q.items.map(p=>p.dealerId))];
   groups.forEach((dealerId,index)=>{const items=q.items.filter(p=>p.dealerId===dealerId);state.purchaseOrders.unshift({id:purchaseOrderId(id,index),orderId:id,dealerId,salonId:salon.id,createdAt:now,status:'pending',items:clone(items),shipping:index===0?q.shipping:0,total:items.reduce((s,p)=>s+p.cost*p.quantity,0)+(index===0?q.shipping:0),tracking:'',carrier:''});});
   q.items.forEach(line=>{state.products.find(p=>p.id===line.id).stock-=line.quantity;});
@@ -189,9 +196,10 @@ function refreshOrder(state,order){
   const pos=state.purchaseOrders.filter(p=>p.orderId===order.id);
   order.status=orderStatusFrom(pos.map(p=>p.status));
 }
-function customerOrder(state,order){
+// internal：管理画面向け（お届けごとの仕入先を含める）。お客様向けには仕入先を出さない
+function customerOrder(state,order,internal=false){
   const {fingerprint,requestKey,fee,feeRate,...safe}=order;
-  return {...clone(safe),payment:paymentLabel(order.paymentMethod,order.paymentStatus),items:safe.items.map(({cost,...p})=>p),shipments:state.purchaseOrders.filter(p=>p.orderId===order.id).map(p=>({id:p.id,dealerId:p.dealerId,dealerName:state.dealers.find(d=>d.id===p.dealerId)?.name,status:p.status,carrier:p.carrier,tracking:p.tracking,shippedAt:p.shippedAt,items:p.items.map(({id,name,quantity})=>({id,name,quantity}))}))};
+  return {...clone(safe),payment:paymentLabel(order.paymentMethod,order.paymentStatus),items:safe.items.map(({cost,...p})=>p),shipments:orderPos(state,order.id).map(p=>({id:p.id,...(internal?{dealerId:p.dealerId,dealerName:state.dealers.find(d=>d.id===p.dealerId)?.name}:{}),status:p.status,carrier:p.carrier,tracking:p.tracking,shippedAt:p.shippedAt,items:p.items.map(({id,name,quantity})=>({id,name,quantity}))}))};
 }
 export function requireOperator(actor,roles=['admin','salon','dealer']){if(!actor.operator)fail('管理ログインが必要です。',401);if(!roles.includes(actor.operator.role))fail('この操作の権限がありません。',403);return actor.operator;}
 export function allowedOrder(actor,order){const op=actor.operator;return op&&(op.role==='admin'||op.role==='salon'&&op.salonId===order.salonId);}
@@ -210,7 +218,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(route==='/addresses'&&method==='GET')return list();
     if(route==='/addresses'&&method==='POST'){if(book.length>=MAX_ADDRESSES)fail(`お届け先は${MAX_ADDRESSES}件まで登録できます。`,409);const isDefault=!book.length||input?.isDefault===true;if(isDefault)book.forEach(a=>{a.isDefault=false;});book.push({id:'ad-'+crypto.randomUUID().slice(0,8),...addressInput(input),isDefault,updatedAt:now});return list();}
     const a=book.find(x=>x.id===route.split('/')[2]);if(!a)fail('お届け先が見つかりません。',404);
-    if(method==='PATCH'){Object.assign(a,addressInput({...a,...input}),{updatedAt:now});if(input?.isDefault===true){book.forEach(x=>{x.isDefault=false;});a.isDefault=true;}return list();}
+    if(method==='PATCH'){const fields=addressInput({...addressView(a),...input});delete a.address;Object.assign(a,fields,{updatedAt:now});if(input?.isDefault===true){book.forEach(x=>{x.isDefault=false;});a.isDefault=true;}return list();}
     if(method==='DELETE'){book.splice(book.indexOf(a),1);if(a.isDefault&&book.length)sortAddresses(book)[0].isDefault=true;return list();}
   }
   // 支払方法管理（仕様書 2.1.3）：登録カード（トークンと下4桁だけ）と、いつものカード
@@ -271,7 +279,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     recordViews(state,op,actor.ip,viewEntries(op,{members:members.map(p=>p.id),orders:orders.map(o=>({salonId:o.salonId,memberId:o.memberId})),shipments:pos.map(p=>({salonId:p.salonId,memberId:state.orders.find(o=>o.id===p.orderId)?.memberId}))}),now);
     return {operator:clone(op),revision:state.revision,products:clone(state.products.filter(p=>op.role!=='dealer'||p.dealerId===op.dealerId)),salons:clone(state.salons.filter(s=>op.role==='admin'||op.role==='salon'&&s.id===op.salonId||op.role==='dealer'&&pos.some(p=>p.salonId===s.id))),dealers:clone(state.dealers.filter(d=>op.role!=='dealer'||d.id===op.dealerId)),
       // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（privacy.js）
-      orders:orders.map(o=>orderForRole(op.role,{...customerOrder(state,o),fee:o.fee,items:clone(o.items)})),
+      orders:orders.map(o=>orderForRole(op.role,{...customerOrder(state,o,true),fee:o.fee,items:clone(o.items)})),
       purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:customerFor(op.role,clone(o.customer),o.memberId)};}),categories:op.role==='admin'?categoryList(state):[],concernNames:CONCERN_NAMES,
       profiles:clone(members).map(p=>({...p,ref:memberRef(p.id)})),accessLogs:state.accessLogs.filter(row=>accessLogVisible(op,row)).slice(0,ACCESS_LOG_LIMIT).map(row=>accessLogView(op,clone(row))),
       customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
@@ -283,7 +291,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(input?.status===po.status)return clone(po);
     if(PO_TRANSITIONS[po.status]!==input?.status)fail('受付 → 出荷 → 配達完了の順に操作してください。',409);
     if(input.status==='shipped'){const {tracking,carrier}=validateTracking(input);po.tracking=tracking;po.carrier=carrier;po.shippedAt=now;}
-    po.status=input.status;if(po.status==='shipped')effects.push({type:'shipped',purchaseOrderId:po.id,orderId:order.id,memberId:order.memberId});refreshOrder(state,order);order.timeline.push({at:now,label:`${state.dealers.find(d=>d.id===po.dealerId).short}：${poStatuses[po.status]}`});
+    po.status=input.status;if(po.status==='shipped')effects.push({type:'shipped',purchaseOrderId:po.id,orderId:order.id,memberId:order.memberId});refreshOrder(state,order);const pos=orderPos(state,order.id);order.timeline.push({at:now,label:shipmentLabel(po.status,pos.indexOf(po)+1,pos.length)});
     log(state,op,poStatuses[po.status],po.id,now);return clone(po);
   }
   const returnAction=route.match(/^\/admin\/orders\/([^/]+)\/refund$/);
@@ -293,9 +301,8 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   }
   // 商品登録・編集（仕様書 2.1.1）。本部は全項目と画像、ディーラーは在庫数だけ
   if(route==='/admin/products'&&method==='POST'){
-    const op=requireOperator(actor,['admin']),fields=productInput(input,catalogContext(state));
-    if(state.products.some(p=>p.sku===fields.sku))fail('この商品コード（SKU）は登録済みです。',409);
-    const {categoryId,...rest}=fields,p={id:newProductId(),...rest,image:input?.imageData?demoImage(input.imageData):''};
+    const op=requireOperator(actor,['admin']),fields=productInput(input,catalogContext(state)),{sku,seq}=nextSku(state.productSeq,state.products.map(p=>p.sku));state.productSeq=seq;
+    const {categoryId,...rest}=fields,p={id:newProductId(),sku,...rest,image:input?.imageData?demoImage(input.imageData):''};
     state.products.push(p);log(state,op,'商品を登録',p.sku,now);return clone(p);
   }
   const productAction=route.match(/^\/admin\/products\/([^/]+)$/);
@@ -304,10 +311,15 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(op.role==='admin'){
       const current={...p,categoryId:state.categories.find(c=>c.name===p.category)?.id};
       const {categoryId,...fields}=productInput({...current,...input},catalogContext(state));
-      if(state.products.some(x=>x.sku===fields.sku&&x.id!==p.id))fail('この商品コード（SKU）は登録済みです。',409);
       Object.assign(p,fields);if(input?.imageData)p.image=demoImage(input.imageData);
     }else{if(['price','cost','enabled','wholesalePrice','sku','name','brand','categoryId','concerns','size','description','tag','dealerId','imageData'].some(k=>input?.[k]!==undefined))fail('ディーラーは在庫数のみ更新できます。',403);p.stock=int(input?.stock,0,99999);}
     log(state,op,'商品・在庫を更新',p.sku,now);return clone(p);
+  }
+  // 価格の一括更新（管理画面の価格一括編集）。すべての行を確かめてから保存する
+  if(route==='/admin/product-prices'&&method==='PATCH'){
+    const op=requireOperator(actor,['admin']),updates=priceRowsInput(input).map(r=>{const p=state.products.find(x=>x.id===r.id)||fail('商品が見つかりません。画面を読み込み直してください。',404);return [p,applyPriceRow(r,p)];});
+    let updated=0;for(const [p,u] of updates){if(!u.changed.length)continue;p.price=u.price;p.cost=u.cost;p.wholesalePrice=u.wholesalePrice;log(state,op,`価格を一括更新（${u.summary}）`,p.sku,now);updated++;}
+    return {updated};
   }
   // カテゴリ管理（仕様書 2.1.1）。商品が登録されているカテゴリは削除できない
   if(route==='/admin/categories'&&method==='POST'){const op=requireOperator(actor,['admin']),{name}=categoryInput(input);if(state.categories.some(c=>c.name===name))fail('同じ名前のカテゴリがあります。',409);state.categories.push({id:newCategoryId(),name,sortOrder:Math.max(-1,...state.categories.map(c=>c.sortOrder))+1});log(state,op,'カテゴリを登録',name,now);return categoryList(state);}

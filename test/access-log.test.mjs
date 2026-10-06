@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { products, concernCategories } from '../catalog.mjs';
 import { demoOperators } from '../dist/platform-core.js';
 import { memberRef } from '../dist/privacy.js';
+import { formatAddress } from '../dist/person.js';
 import { ACCESS_VIEW_INTERVAL_MS } from '../dist/access-log.js';
 import { createSqliteAdapter } from '../db/adapter.mjs';
 import { createPlatformStore } from '../db/platform-store.mjs';
@@ -21,7 +22,8 @@ import { engines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z', later = minutes => new Date(Date.parse(now) + minutes * 60000).toISOString();
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
-const secret = { name: '個人 太郎', address: '秘密県 秘密市 9-8-7', postal: '1234567' };
+const secret = { name: '個人 太郎', postal: '1234567', prefecture: '東京都', city: '秘密市', street: '9-8-7', building: '秘密ハイツ101', phone: '09012345678' };
+secret.address = formatAddress(secret);
 const pick = row => ({ actorName: row.actorName, role: row.role, salonId: row.salonId, action: row.action, target: row.target, count: row.count, channel: row.channel });
 const fakeReq = cookie => ({ headers: { cookie: cookie || '' }, socket: { remoteAddress: '127.0.0.1' } });
 const fakeRes = () => { const headers = {}; return { headers, setHeader: (k, v) => { headers[k] = v; } }; };
@@ -93,7 +95,7 @@ for (const [name, create] of engines(now)) {
     assert.ok(other.length > 0 && other.every(r => r.actorName === 'BOTANICA ディーラー担当'));
     // 記録に個人情報の値は入らない
     const text = JSON.stringify(all);
-    for (const value of [secret.name, secret.address, secret.postal, 'kojin-taro@example.test']) assert.ok(!text.includes(value), value);
+    for (const value of [secret.name, secret.address, secret.city, secret.postal, 'kojin-taro@example.test']) assert.ok(!text.includes(value), value);
   });
 
   run('CSV exports with customer data are recorded after checking that every row belongs to the salon', async e => {
@@ -127,7 +129,7 @@ async function registerCustomer({ store, auth }, email = 'Kojin-Taro@example.tes
   await store.request('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: secret }, member, now);
   return registered.member;
 }
-const plaintextIn = (text, values = [secret.name, secret.address, secret.postal, 'kojin-taro@example.test', 'コジン タロウ', '090-1234-5678']) => values.filter(v => text.includes(v));
+const plaintextIn = (text, values = [secret.name, secret.address, secret.city, secret.building, secret.postal, 'kojin-taro@example.test', 'コジン タロウ', '09012345678']) => values.filter(v => text.includes(v));
 
 test('sqlite: customer fields are stored encrypted, while e-mail login, duplicate checks and the screens keep working', async () => {
   const db = await createSqliteAdapter(':memory:');
@@ -139,9 +141,9 @@ test('sqlite: customer fields are stored encrypted, while e-mail login, duplicat
     for (const k of ['email', 'name', 'kana', 'phone']) assert.ok(isEncrypted(row[k]), k);
     assert.match(row.email_index, /^[0-9a-f]{64}$/);
     // メールアドレスは大文字・小文字を区別せず検索・重複確認できる
-    await assert.rejects(ctx.auth.request('/api/auth/register', 'POST', { salon: 'x', name: 'x', kana: 'エックス', email: 'KOJIN-TARO@example.test', password: 'Demo-Member-2026', agreePrivacy: true }, fakeReq(), fakeRes()), /登録済み/);
+    await assert.rejects(ctx.auth.request('/api/auth/register', 'POST', { salon: 'x', name: '個人 二郎', kana: 'コジン ジロウ', email: 'KOJIN-TARO@example.test', password: 'Demo-Member-2026', agreePrivacy: true }, fakeReq(), fakeRes()), /登録済み/);
     const login = await ctx.auth.request('/api/auth/login', 'POST', { email: 'kojin-taro@example.test', password: 'Demo-Member-2026' }, fakeReq(), fakeRes());
-    assert.equal(login.member.name, secret.name); assert.equal(login.member.phone, '090-1234-5678');
+    assert.equal(login.member.name, secret.name); assert.equal(login.member.phone, '09012345678');
     // 画面には復号した値を渡す（担当サロン）
     const salon = await ctx.store.request('/admin/snapshot', 'GET', undefined, salonOp, now);
     assert.equal(salon.profiles.find(p => p.id === taro.id).name, secret.name);

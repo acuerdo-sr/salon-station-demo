@@ -8,7 +8,7 @@ import {createLimiter,clientIp} from '../rate-limit.mjs';
 const now='2026-10-06T03:00:00.000Z';
 const admin={operator:demoOperators[0]},dealer={operator:demoOperators[2]};
 const member={id:'buyer-a',name:'デモ 花子',kana:'デモ ハナコ',email:'a@example.test'},actor={member};
-const customer={name:'デモ 花子',address:'架空県 1-2-3',postal:'0000000'};
+const customer={name:'デモ 花子',postal:'0000000',prefecture:'東京都',city:'架空市',street:'1-2-3',phone:'0300000000'};
 function fixture(){const s=createPlatform(products,now);s.orders=[];s.purchaseOrders=[];s.profiles=[];s.events=[];s.products.forEach(p=>p.stock=products.find(x=>x.id===p.id).stock);platformRequest(s,'/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},actor,now);return s;}
 const salonInput={name:'デモ店',owner:'デモ株式会社（架空）',prefecture:'山口県',city:'萩市',street:'椿東1-1-1',phone:'0838-11-1111'};
 
@@ -51,7 +51,7 @@ test('paused salons: the member still sees their own salon as paused, and the ad
   assert.equal(p.salonId,'lumiere');assert.equal(p.salonEnabled,false);
   assert.ok(!platformRequest(s,'/bootstrap','GET',undefined,actor,now).salons.some(x=>x.id==='lumiere'));
   assert.equal(platformRequest(s,'/profile','PATCH',{salonId:'lumiere',staffId:'yui'},actor,now).staffId,'yui');
-  const other={member:{id:'buyer-b',name:'別会員',kana:'ベツ カイイン',email:'b@example.test'}};
+  const other={member:{id:'buyer-b',name:'別 会員',kana:'ベツ カイイン',email:'b@example.test'}};
   assert.throws(()=>platformRequest(s,'/profile','PATCH',{salonId:'lumiere',staffId:''},other,now),/ご利用いただけません/);
   platformRequest(s,'/profile','PATCH',{salonId:'atelier',staffId:''},other,now);
   assert.throws(()=>platformRequest(s,'/admin/members/buyer-b','PATCH',{salonId:'lumiere'},admin,now),/受付を停止/);

@@ -26,24 +26,59 @@ export function decodeImage(dataUrl, maxBytes = MAX_IMAGE_BYTES) {
 
 export function categoryInput(input) { return { name: text(input?.name, 30, 'カテゴリ名', true) }; }
 
-// 商品の入力。categories / dealers は登録済みのもの、concernNames は「お悩み」の一覧（名前）
+// 価格（税込）。仕入単価・卸価格は売価以下
+export function priceInput(input) {
+  const price = int(input?.price, 1, 1000000, '販売価格'), cost = int(input?.cost, 0, 1000000, '仕入単価'), wholesalePrice = int(input?.wholesalePrice, 0, 1000000, '卸価格');
+  if (cost > price) fail('仕入単価は売価以下にしてください。');
+  if (wholesalePrice > price) fail('卸価格は売価以下にしてください。');
+  return { price, cost, wholesalePrice };
+}
+
+// 商品の入力。categories / dealers は登録済みのもの、concernNames は「お悩み」の一覧（名前）。
+// 商品コード（SKU）は登録時に自動で付ける（nextSku）ため、入力からは受け取らない
 export function productInput(input, { categories, dealers, concernNames }) {
-  const sku = text(input?.sku, 30, '商品コード（SKU）', true).toUpperCase();
-  if (!/^[A-Z0-9][A-Z0-9-]{2,29}$/.test(sku)) fail('商品コード（SKU）は英数字とハイフンで3〜30文字にしてください。');
   const category = categories.find(c => c.id === input?.categoryId) || fail('カテゴリを選んでください。');
   const dealer = dealers.find(d => d.id === input?.dealerId) || fail('出荷するディーラーを選んでください。');
   const concerns = Array.isArray(input?.concerns) ? [...new Set(input.concerns.map(String))] : [];
   if (concerns.some(c => !concernNames.includes(c))) fail('お悩みの指定を確認してください。');
-  const price = int(input?.price, 1, 1000000, '販売価格'), cost = int(input?.cost, 0, 1000000, '仕入単価'), wholesalePrice = int(input?.wholesalePrice, 0, 1000000, '卸価格');
-  if (cost > price) fail('仕入単価は売価以下にしてください。');
-  if (wholesalePrice > price) fail('卸価格は売価以下にしてください。');
+  const { price, cost, wholesalePrice } = priceInput(input);
   if (typeof input?.enabled !== 'boolean') fail('公開設定を確認してください。');
   return {
-    sku, brand: text(input?.brand, 100, 'ブランド名', true), name: text(input?.name, 100, '商品名', true), categoryId: category.id, category: category.name, concerns,
+    brand: text(input?.brand, 100, 'ブランド名', true), name: text(input?.name, 100, '商品名', true), categoryId: category.id, category: category.name, concerns,
     size: text(input?.size, 40, '容量・サイズ'), description: text(input?.description, 1000, '商品説明'), tag: text(input?.tag, 20, 'ラベル'),
     price, cost, wholesalePrice, dealerId: dealer.id, stock: int(input?.stock, 0, 99999, '在庫数'), enabled: input.enabled,
   };
 }
+// 商品コードの自動採番：P-00001 の形。seq はこれまでに付けた番号、skus は登録済みの商品コード（初期データの SN-SH-050 などはそのまま）
+const SKU_NUMBER = /^P-(\d+)$/;
+export function nextSku(seq, skus) {
+  const used = new Set(skus);
+  let n = Math.max(Number(seq) || 0, ...skus.map(s => Number(SKU_NUMBER.exec(s)?.[1] || 0))) + 1;
+  while (used.has('P-' + String(n).padStart(5, '0'))) n++;
+  return { sku: 'P-' + String(n).padStart(5, '0'), seq: n };
+}
+
+// 価格の一括更新（管理画面の表）。before は画面を開いたときの値で、その後に他の担当者が変えていたら保存しない
+export const MAX_PRICE_ROWS = 1000;
+const PRICE_KEYS = ['price', 'cost', 'wholesalePrice'], PRICE_NAMES = { price: '売価', cost: '仕入', wholesalePrice: '卸' };
+export function priceRowsInput(input) {
+  const rows = Array.isArray(input?.items) ? input.items : [];
+  if (!rows.length) fail('変更した商品がありません。');
+  if (rows.length > MAX_PRICE_ROWS) fail(`一度に保存できるのは${MAX_PRICE_ROWS}件までです。`);
+  const ids = rows.map(r => String(r?.id ?? ''));
+  if (new Set(ids).size !== ids.length) fail('同じ商品が2回含まれています。');
+  return rows.map((r, i) => ({ id: ids[i], before: r?.before && typeof r.before === 'object' ? r.before : null, ...Object.fromEntries(PRICE_KEYS.filter(k => r?.[k] !== undefined).map(k => [k, r[k]])) }));
+}
+// 1件分の確認。current は登録済みの商品。誤りには「商品コード（商品名）：」を付けて、どの行か分かるようにする
+export function applyPriceRow(row, current) {
+  const label = `${current.sku}（${current.name}）：`;
+  if (row.before && PRICE_KEYS.some(k => Number(row.before[k]) !== current[k])) fail(`${label}他の担当者が価格を変更しました。画面を読み込み直してから、もう一度保存してください。`, 409);
+  let next;
+  try { next = priceInput({ ...Object.fromEntries(PRICE_KEYS.map(k => [k, current[k]])), ...row }); } catch (error) { error.message = label + error.message; throw error; }
+  const changed = PRICE_KEYS.filter(k => next[k] !== current[k]);
+  return { ...next, changed, summary: changed.map(k => `${PRICE_NAMES[k]} ${current[k].toLocaleString('ja-JP')}→${next[k].toLocaleString('ja-JP')}`).join(' / ') };
+}
+
 // お悩みカテゴリ（仕様書 2.2.8）と、初期データのカテゴリID（表示名は日本語、IDは英字で固定）
 export const CONCERN_NAMES = ['ダメージヘア対策', 'エイジングケア', '白髪対策', 'ボリュームアップ', '頭皮ケア', 'カラーケア', 'パーマケア'];
 export const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil' };

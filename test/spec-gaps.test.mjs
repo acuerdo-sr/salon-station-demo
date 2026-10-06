@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
 import { memberRef } from '../dist/privacy.js';
+import { formatAddress } from '../dist/person.js';
 import { demoTokenize } from '../dist/payment-core.js';
 import { SHIPPING_COLUMNS } from '../dist/shipping-csv.js';
 import { engines } from './helpers/engines.mjs';
@@ -11,8 +12,9 @@ import { engines } from './helpers/engines.mjs';
 const now = '2026-10-06T03:00:00.000Z', later = minutes => new Date(Date.parse(now) + minutes * 60000).toISOString();
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
 const atelierOp = { operator: { id: 'salon-atelier', role: 'salon', salonId: 'atelier', name: 'atelier 凪 店舗担当' } };
-const home = { name: '自宅 太郎', postal: '1234567', address: '秘密県 秘密市 9-8-7 サンプルマンション101号室', phone: '090-1234-5678' };
-const office = { name: '会社 太郎', postal: '765-4321', address: '架空県 架空市 1-1-1', phone: '03-0000-0000' };
+const home = { name: '自宅 太郎', postal: '1234567', prefecture: '東京都', city: '秘密市', street: '9-8-7', building: 'サンプルマンション101号室', phone: '090-1234-5678' };
+home.address = formatAddress(home);
+const office = { name: '会社 太郎', postal: '765-4321', prefecture: '神奈川県', city: '架空市', street: '1-1-1', phone: '03-0000-0000' };
 const shampoo = [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], twoDealers = [...shampoo, { id: 'oil-smooth', quantity: 1, price: 2640 }];
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const card = number => demoTokenize({ number, expMonth: 12, expYear: 2030 });
@@ -27,7 +29,7 @@ for (const [name, create] of engines(now)) {
     const taro = await linked(e, 'kojin-taro');
     assert.deepEqual(await e.call('/addresses', 'GET', undefined, taro), []);
     const first = await order(e, taro);
-    assert.equal(first.customer.phone, home.phone);
+    assert.equal(first.customer.phone, '09012345678', '電話番号は数字だけにそろえる');
     let book = await e.call('/addresses', 'GET', undefined, taro);
     assert.equal(book.length, 1); assert.equal(book[0].isDefault, true); assert.equal(book[0].address, home.address);
     book = await e.call('/addresses', 'POST', { ...office, isDefault: true }, taro, later(1));
@@ -35,19 +37,19 @@ for (const [name, create] of engines(now)) {
     assert.equal((await e.call('/profile', 'GET', undefined, taro)).address.name, '会社 太郎');
     // 住所録から選んだお届け先で注文する（入力したお届け先より優先）
     const second = await order(e, taro, { addressId: book[0].id, customer: undefined });
-    assert.deepEqual([second.customer.name, second.customer.postal, second.customer.phone], ['会社 太郎', '765-4321', '03-0000-0000']);
+    assert.deepEqual([second.customer.name, second.customer.postal, second.customer.prefecture, second.customer.phone], ['会社 太郎', '7654321', '神奈川県', '0300000000']);
     // 他の会員の住所は使えない
     const hanako = await linked(e, 'kojin-hanako');
     await assert.rejects(order(e, hanako, { addressId: book[0].id }), /お届け先が見つかりません/);
     await assert.rejects(e.call(`/addresses/${book[0].id}`, 'PATCH', { name: 'x' }, hanako), /お届け先が見つかりません/);
     // 編集・削除（既定を消したら、残りの1件が既定になる）
     book = await e.call(`/addresses/${book[1].id}`, 'PATCH', { phone: '080-9999-0000' }, taro, later(2));
-    assert.equal(book.find(a => a.name === '自宅 太郎').phone, '080-9999-0000');
+    assert.equal(book.find(a => a.name === '自宅 太郎').phone, '08099990000');
     book = await e.call(`/addresses/${book.find(a => a.isDefault).id}`, 'DELETE', undefined, taro, later(3));
     assert.deepEqual(book.map(a => [a.name, a.isDefault]), [['自宅 太郎', true]]);
     await assert.rejects(e.call('/addresses', 'POST', { ...office, postal: '12' }, taro), /郵便番号/);
     await assert.rejects(e.call('/addresses', 'POST', { ...office, phone: '12-34' }, taro), /電話番号/);
-    for (let i = 0; i < 9; i++) await e.call('/addresses', 'POST', { ...office, name: `住所${i}` }, taro, later(10 + i));
+    for (let i = 0; i < 9; i++) await e.call('/addresses', 'POST', { ...office, name: `住所 ${'イロハニホヘトチリヌ'[i]}` }, taro, later(10 + i));
     await assert.rejects(e.call('/addresses', 'POST', office, taro), /10件まで/);
     await assert.rejects(e.call('/addresses', 'GET', undefined, {}), /ログイン/);
     if (e.sql) for (const row of await e.db.all('SELECT name, address, phone FROM member_addresses')) for (const value of Object.values(row)) assert.match(value, /^enc:v1:/);
@@ -95,16 +97,16 @@ for (const [name, create] of engines(now)) {
 
   run('the salon edits its own customers (not the e-mail); other salons and headquarters cannot', async e => {
     const taro = await linked(e, 'kojin-taro');
-    const edited = await e.call('/admin/customers/kojin-taro', 'PATCH', { name: '個人 太郎（変更）', kana: 'コジン タロウ', phone: '090-1111-2222', gender: '1', birthday: '1990-04-01', email: 'forged@example.test' }, salonOp);
-    assert.deepEqual([edited.name, edited.kana, edited.phone, edited.gender, edited.ref], ['個人 太郎（変更）', 'コジン タロウ', '090-1111-2222', '1', memberRef('kojin-taro')]);
+    const edited = await e.call('/admin/customers/kojin-taro', 'PATCH', { name: '個人 二郎', kana: 'コジン タロウ', phone: '090-1111-2222', gender: '1', birthday: '1990-04-01', email: 'forged@example.test' }, salonOp);
+    assert.deepEqual([edited.name, edited.kana, edited.phone, edited.gender, edited.ref], ['個人 二郎', 'コジン タロウ', '09011112222', '1', memberRef('kojin-taro')]);
     assert.equal(edited.email, taro.member.email);
     await assert.rejects(e.call('/admin/customers/kojin-taro', 'PATCH', { name: 'x', kana: 'エックス' }, atelierOp), /会員が見つかりません/);
     await assert.rejects(e.call('/admin/customers/kojin-taro', 'PATCH', { name: 'x', kana: 'エックス' }, admin), /権限/);
-    await assert.rejects(e.call('/admin/customers/kojin-taro', 'PATCH', { name: 'x', kana: '' }, salonOp), /フリガナ/);
-    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, salonOp)).profiles.find(p => p.id === 'kojin-taro').name, '個人 太郎（変更）');
+    await assert.rejects(e.call('/admin/customers/kojin-taro', 'PATCH', { name: '個人 太郎', kana: '' }, salonOp), /フリガナ/);
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, salonOp)).profiles.find(p => p.id === 'kojin-taro').name, '個人 二郎');
     const events = (await e.call('/admin/snapshot', 'GET', undefined, admin)).events;
     assert.ok(events.some(ev => ev.action === '会員情報を編集' && ev.reference === memberRef('kojin-taro')));
-    if (e.sql) assert.equal(e.fieldCrypto.decrypt((await e.db.get("SELECT name FROM members WHERE id='kojin-taro'")).name), '個人 太郎（変更）');
+    if (e.sql) assert.equal(e.fieldCrypto.decrypt((await e.db.get("SELECT name FROM members WHERE id='kojin-taro'")).name), '個人 二郎');
   });
 
   run('shipping instruction CSV: dealers export unshipped orders with phone and split address; access is recorded; headquarters exports franchisee orders', async e => {
@@ -114,8 +116,8 @@ for (const [name, create] of engines(now)) {
     const csv = await e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, { ...sena, ip: '192.0.2.8' });
     assert.deepEqual(csv.columns, SHIPPING_COLUMNS); assert.match(csv.filename, /^出荷指示_EC注文_20261006\.csv$/);
     const row = Object.fromEntries(csv.columns.map((c, i) => [c, csv.rows[0][i]]));
-    assert.equal(row['お客様管理番号'], po); assert.equal(row['お届け先電話番号'], '090-1234-5678'); assert.equal(row['お届け先郵便番号'], '1234567');
-    assert.equal(row['お届け先住所1'] + row['お届け先住所2'] + row['お届け先住所3'], home.address); assert.ok([...row['お届け先住所1']].length <= 16);
+    assert.equal(row['お客様管理番号'], po); assert.equal(row['お届け先電話番号'], '09012345678'); assert.equal(row['お届け先郵便番号'], '1234567');
+    assert.deepEqual([row['お届け先住所1'], row['お届け先住所2'], row['お届け先住所3']], ['東京都秘密市', '9-8-7', 'サンプルマンション101号室']);
     assert.equal(row['お届け先名称1'], home.name); assert.equal(row['ご依頼主名称1'], 'LUMIÈRE 表参道'); assert.equal(row['品名1'], 'モイストリペア シャンプー ×1');
     assert.ok(!csv.columns.includes('代引金額'), 'カード決済のみなので代引きの列はない'); assert.equal(row['便種'], '飛脚宅配便'); assert.equal(row['記事'], `注文 ${paid.id}`);
     const logs = (await e.call('/admin/snapshot', 'GET', undefined, salonOp, later(1))).accessLogs;
@@ -140,28 +142,28 @@ for (const [name, create] of engines(now)) {
     assert.equal(styling.productCount, 0);
     await assert.rejects(e.call('/admin/categories', 'POST', { name: 'シャンプー' }, admin), /同じ名前/);
     await assert.rejects(e.call('/admin/categories', 'POST', { name: '新カテゴリ' }, salonOp), /権限/);
-    const input = { sku: 'sn-wax-01', brand: 'SENA', name: 'ナチュラル ヘアワックス', categoryId: styling.id, concerns: ['ボリュームアップ'], size: '80 g', description: '軽い仕上がり。', tag: 'NEW', price: 2420, cost: 1400, wholesalePrice: 1573, dealerId: 'sena', stock: 30, enabled: true, imageData: PNG };
+    const input = { brand: 'SENA', name: 'ナチュラル ヘアワックス', categoryId: styling.id, concerns: ['ボリュームアップ'], size: '80 g', description: '軽い仕上がり。', tag: 'NEW', price: 2420, cost: 1400, wholesalePrice: 1573, dealerId: 'sena', stock: 30, enabled: true, imageData: PNG };
     const p = await e.call('/admin/products', 'POST', input, admin);
-    assert.deepEqual([p.sku, p.category, p.concerns, p.stock, p.dealerId, p.wholesalePrice], ['SN-WAX-01', 'スタイリング', ['ボリュームアップ'], 30, 'sena', 1573]);
+    assert.deepEqual([p.sku, p.category, p.concerns, p.stock, p.dealerId, p.wholesalePrice], ['P-00001', 'スタイリング', ['ボリュームアップ'], 30, 'sena', 1573], '商品コードは自動で付ける');
     assert.ok(e.sql ? /^uploads\/products\/test-1\.png$/.test(p.image) : p.image.startsWith('data:image/png;base64,'));
-    await assert.rejects(e.call('/admin/products', 'POST', input, admin), /登録済み/);
-    await assert.rejects(e.call('/admin/products', 'POST', { ...input, sku: 'SN-WAX-02' }, sena), /権限/);
-    await assert.rejects(e.call('/admin/products', 'POST', { ...input, sku: 'SN-WAX-03', imageData: 'data:image/png;base64,' + btoa('this is not a png') }, admin), /画像の形式/);
-    await assert.rejects(e.call('/admin/products', 'POST', { ...input, sku: 'SN-WAX-04', concerns: ['寝ぐせ'] }, admin), /お悩み/);
-    await assert.rejects(e.call('/admin/products', 'POST', { ...input, sku: 'SN-WAX-05', cost: 9999 }, admin), /仕入単価は売価以下/);
+    assert.equal((await e.call('/admin/products', 'POST', { ...input, sku: 'MY-CODE' }, admin)).sku, 'P-00002', '入力した商品コードは使わない');
+    await assert.rejects(e.call('/admin/products', 'POST', input, sena), /権限/);
+    await assert.rejects(e.call('/admin/products', 'POST', { ...input, imageData: 'data:image/png;base64,' + btoa('this is not a png') }, admin), /画像の形式/);
+    await assert.rejects(e.call('/admin/products', 'POST', { ...input, concerns: ['寝ぐせ'] }, admin), /お悩み/);
+    await assert.rejects(e.call('/admin/products', 'POST', { ...input, cost: 9999 }, admin), /仕入単価は売価以下/);
     // 会員のストアに、カテゴリと一緒に出る
     const member = await e.member('kojin-taro');
     const boot = await e.call('/bootstrap', 'GET', undefined, member);
     assert.ok(boot.products.some(x => x.id === p.id)); assert.ok(boot.categories.some(c => c.id === styling.id && c.name === 'スタイリング'));
     assert.deepEqual((await e.call('/bootstrap', 'GET', undefined, {})).categories, []);
     // 本部は全項目を編集、ディーラーは在庫だけ
-    const edited = await e.call(`/admin/products/${p.id}`, 'PATCH', { name: 'ナチュラル ヘアワックス（ソフト）', concerns: [], price: 2640, stock: 25 }, admin);
-    assert.deepEqual([edited.name, edited.concerns, edited.price, edited.stock, edited.category], ['ナチュラル ヘアワックス（ソフト）', [], 2640, 25, 'スタイリング']);
+    const edited = await e.call(`/admin/products/${p.id}`, 'PATCH', { sku: 'CHANGED', name: 'ナチュラル ヘアワックス（ソフト）', concerns: [], price: 2640, stock: 25 }, admin);
+    assert.deepEqual([edited.sku, edited.name, edited.concerns, edited.price, edited.stock, edited.category], ['P-00001', 'ナチュラル ヘアワックス（ソフト）', [], 2640, 25, 'スタイリング']);
     await assert.rejects(e.call(`/admin/products/${p.id}`, 'PATCH', { name: 'x' }, sena), /在庫数のみ/);
     assert.equal((await e.call(`/admin/products/${p.id}`, 'PATCH', { stock: 40 }, sena)).stock, 40);
     // カテゴリの名前を変えると商品の表示も変わる。商品があるカテゴリは削除できない
     cats = await e.call(`/admin/categories/${styling.id}`, 'PATCH', { name: 'スタイリング剤', sortOrder: 0 }, admin);
-    assert.equal(cats[0].name, 'スタイリング剤'); assert.equal(cats[0].productCount, 1);
+    assert.equal(cats[0].name, 'スタイリング剤'); assert.equal(cats[0].productCount, 2);
     assert.equal((await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(x => x.id === p.id).category, 'スタイリング剤');
     await assert.rejects(e.call(`/admin/categories/${styling.id}`, 'DELETE', undefined, admin), /削除できません/);
     const empty = (await e.call('/admin/categories', 'POST', { name: '空のカテゴリ' }, admin)).find(c => c.name === '空のカテゴリ');

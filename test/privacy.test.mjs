@@ -4,12 +4,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
 import { memberRef, PRIVACY_VERSION, privacyPolicy } from '../dist/privacy.js';
+import { formatAddress } from '../dist/person.js';
 import { createMemberStore } from '../dist/member-store.js';
 import { engines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z';
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] };
-const secret = { name: '個人 太郎', address: '秘密県 秘密市 9-8-7', postal: '1234567' };
+const secret = { name: '個人 太郎', postal: '1234567', prefecture: '東京都', city: '秘密市', street: '9-8-7', building: '秘密ハイツ101', phone: '09012345678' };
+secret.address = formatAddress(secret);
 
 test('member numbers are stable, pseudonymous and the policy is versioned', () => {
   assert.equal(memberRef('kojin-taro'), 'M-OJINTARO');
@@ -20,7 +22,7 @@ test('member numbers are stable, pseudonymous and the policy is versioned', () =
 test('browser member store: registration requires consent and records the policy version', async () => {
   const mem = () => { const d = new Map(); return { getItem: k => d.get(k) ?? null, setItem: (k, v) => d.set(k, v), removeItem: k => d.delete(k) }; };
   const members = createMemberStore(mem(), mem(), 'm');
-  const input = { salon: 'x', name: 'x', kana: 'エックス', email: 'c@example.test', password: 'Demo-Member-2026' };
+  const input = { salon: 'x', name: 'テスト 会員', kana: 'テスト カイイン', email: 'c@example.test', password: 'Demo-Member-2026' };
   await assert.rejects(members.request('/auth/register', 'POST', input), /同意/);
   await assert.rejects(members.request('/auth/register', 'POST', { ...input, agreePrivacy: 'yes' }), /同意/);
   const created = (await members.request('/auth/register', 'POST', { ...input, agreePrivacy: true })).member;
@@ -34,10 +36,10 @@ for (const [name, create] of engines(now)) {
   run('headquarters sees aggregates and member numbers only; the salon sees its customers; dealers see what they need to ship', async e => {
     const customer = await e.member('kojin-taro', secret.name), ref = memberRef('kojin-taro');
     await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, customer);
-    const order = await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: { name: secret.name, address: secret.address, postal: secret.postal } }, customer);
-    await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'oil-smooth', quantity: 1, price: 2640 }], customer: { name: secret.name, address: secret.address, postal: secret.postal } }, customer);
+    const order = await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: secret }, customer);
+    await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'oil-smooth', quantity: 1, price: 2640 }], customer: secret }, customer);
     const hq = await e.call('/admin/snapshot', 'GET', undefined, admin), hqText = JSON.stringify(hq);
-    for (const value of [secret.name, secret.address, secret.postal, 'kojin-taro@example.test', '"kojin-taro"']) assert.ok(!hqText.includes(value), `本部に ${value} が渡っています`);
+    for (const value of [secret.name, secret.address, secret.city, secret.postal, secret.phone, 'kojin-taro@example.test', '"kojin-taro"']) assert.ok(!hqText.includes(value), `本部に ${value} が渡っています`);
     assert.deepEqual(hq.profiles, []);
     const hqOrder = hq.orders.find(o => o.id === order.id);
     assert.equal(hqOrder.customerRef, ref); assert.equal(hqOrder.customer.name, `会員 ${ref}`); assert.equal(hqOrder.customer.address, ''); assert.equal(hqOrder.memberId, undefined);

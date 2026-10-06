@@ -5,6 +5,7 @@ import { jst, includedTax } from '../dist/platform-core.js';
 import { wholesaleOf, salonAddress } from '../dist/supply-core.js';
 import { createFieldCrypto } from './crypto.mjs';
 import { seedCategories } from '../dist/catalog-core.js';
+import { encodeAddress } from '../dist/person.js';
 
 // お悩みの ID（表示名は日本語、ID は英字で固定）。カテゴリの ID は dist/catalog-core.js の seedCategories
 const CONCERN_IDS = { ダメージヘア対策: 'damage', エイジングケア: 'aging', 白髪対策: 'gray-hair', ボリュームアップ: 'volume', 頭皮ケア: 'scalp', カラーケア: 'color', パーマケア: 'perm' };
@@ -80,7 +81,7 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
       payment_method, status, payment_status, ship_name, ship_postal, ship_address, ship_phone, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'card', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [o.id, o.requestKey || `legacy-${o.id}`, c.digest(o.fingerprint || ''), o.memberId, o.salonId, o.salonName, o.seller || o.salonName, o.staffId || '', o.staffName || '指名なし', o.feeRate ?? 0, o.fee ?? 0, o.subtotal, o.shipping, o.total, includedTax(o.total),
-      o.status, paymentStatus, ...[o.customer?.name, o.customer?.postal, o.customer?.address, o.customer?.phone, o.customer?.email].map(v => c.encrypt(v || '')), o.returnReason ? c.encrypt(o.returnReason) : null, o.stockRestored ? 1 : 0, o.sample ? 1 : 0,
+      o.status, paymentStatus, ...[o.customer?.name, o.customer?.postal, o.customer?.prefecture ? encodeAddress(o.customer) : o.customer?.address, o.customer?.phone, o.customer?.email].map(v => c.encrypt(v || '')), o.returnReason ? c.encrypt(o.returnReason) : null, o.stockRestored ? 1 : 0, o.sample ? 1 : 0,
       jst(o.createdAt).slice(0, 10), o.createdAt, now]);
     const pos = (state.purchaseOrders || []).filter(p => p.orderId === o.id).sort((a, b) => a.id.localeCompare(b.id));
     for (const [i, po] of pos.entries()) {
@@ -128,6 +129,7 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   // 採番・更新番号
   const seq = Math.max(state.salonSeq ?? 0, (state.salons || []).length, ...(state.salons || []).map(s => Number(/^S(\d+)$/.exec(s.id)?.[1] || 0)));
   await tx.run('INSERT INTO counters (name, value) VALUES (?, ?)', ['salon_seq', seq]);
+  await tx.run('INSERT INTO counters (name, value) VALUES (?, ?)', ['product_seq', state.productSeq || 0]);
   await tx.run('INSERT INTO counters (name, value) VALUES (?, ?)', ['revision', state.revision || 0]);
   return { salons: salonIds.size, products: products.length, members: members.size, orders: orders.length };
 }
