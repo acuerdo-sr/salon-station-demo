@@ -50,7 +50,7 @@ export function createLineAuth(auth, config, options = {}) {
   const demoEmail = sub => `line-${createHash('sha256').update(sub).digest('hex').slice(0, 10)}@example.test`;
   // LINEのユーザーIDで会員を特定する。未登録なら簡略登録、ログイン中の会員がいればそのアカウントに連携する。
   async function resolveMember(payload, currentMember) {
-    const existing = auth.findByLineId(payload.sub);
+    const existing = await auth.findByLineId(payload.sub);
     if (currentMember) {
       if (existing && existing.id !== currentMember.id) fail('このLINEアカウントは別の会員に連携済みです。', 409, 'conflict');
       return existing || auth.linkLine(currentMember.id, payload.sub);
@@ -92,7 +92,7 @@ export function createLineAuth(auth, config, options = {}) {
       const token = await post(`${config.apiBase}/oauth2/v2.1/token`, { grant_type: 'authorization_code', code, redirect_uri: config.callbackUrl, client_id: config.channelId, client_secret: config.channelSecret });
       if (!token.id_token) fail('LINEからIDトークンを受け取れませんでした。', 502);
       const payload = await verifyIdToken(token.id_token, saved.nonce);
-      const current = saved.memberId ? auth.findById(saved.memberId) : null;
+      const current = saved.memberId ? await auth.findById(saved.memberId) : null;
       const member = await resolveMember(payload, current);
       return { member, redirect: frontUrl({ shop_id: saved.salonId, staff: saved.staffId, line: current ? 'linked' : 'ok' }) };
     },

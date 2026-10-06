@@ -19,7 +19,9 @@ export async function platform(route,method='GET',input){
     let state,raw=localStorage.getItem(key);if(raw){try{state=JSON.parse(raw);}catch{throw Error('保存データを読み込めません。');}if(migrate(state,await catalogPromise))raw=null;}else state=createPlatform(await catalogPromise);
     const {member}=await api('/auth/me');
     const result=platformRequest(state,route,method,input,{operator,member});
-    if(!raw||method!=='GET'&&!['/quote','/admin/sales'].includes(route)){state.revision++;try{localStorage.setItem(key,JSON.stringify(state));}catch{throw Error('保存できません。ブラウザの保存設定を確認してください。');}}
+    // 変更を伴う処理は保存する。カート・お気に入りは他の画面の再読み込みを促さない（更新番号を上げない）。
+    const readOnly=method==='GET'||['/quote','/admin/sales'].includes(route),quiet=['/cart','/favorites'].includes(route);
+    if(!raw||!readOnly){if(!readOnly&&!quiet)state.revision++;try{localStorage.setItem(key,JSON.stringify(state));}catch{throw Error('保存できません。ブラウザの保存設定を確認してください。');}}
     return result;
   };
   // Use a separate lock from membership to avoid nesting the same lock.

@@ -9,18 +9,19 @@ export const DEMO_OPERATOR_PASSWORD = 'Demo-Admin-2026';
 export const statuses = {ordered:'発注済み',processing:'出荷準備中',partially_shipped:'一部出荷済み',shipped:'出荷済み',delivered:'お届け済み',cancelled:'キャンセル',return_requested:'返品受付',returned:'返品・返金済み'};
 export const poStatuses = {pending:'受付待ち',accepted:'出荷準備中',shipped:'出荷済み',delivered:'お届け済み',cancelled:'キャンセル',returned:'返品済み'};
 const clone = value => structuredClone(value);
-function fail(message,status=400){ const error=new Error(message);error.status=status;throw error; }
-const required=(value,max=120)=>{if(typeof value!=='string'||!value.trim()||value.trim().length>max)fail('入力内容を確認してください。');return value.trim();};
-const int=(value,min,max)=>{if(!Number.isInteger(value)||value<min||value>max)fail(`${min}〜${max}の整数で入力してください。`);return value;};
-const optional=(value,max)=>{if(value==null)return '';if(typeof value!=='string'||value.trim().length>max)fail(`${max}文字以内で入力してください。`);return value.trim();};
+// 以下の検証・計算は、ブラウザ版（このファイルの state）と DB版（db/platform-store.mjs）で共有する。
+export function fail(message,status=400){ const error=new Error(message);error.status=status;throw error; }
+export const required=(value,max=120)=>{if(typeof value!=='string'||!value.trim()||value.trim().length>max)fail('入力内容を確認してください。');return value.trim();};
+export const int=(value,min,max)=>{if(!Number.isInteger(value)||value<min||value>max)fail(`${min}〜${max}の整数で入力してください。`);return value;};
+export const optional=(value,max)=>{if(value==null)return '';if(typeof value!=='string'||value.trim().length>max)fail(`${max}文字以内で入力してください。`);return value.trim();};
 // 店舗マスタ項目（仕様書 2.6.1）。salon ロールは自店舗の基本情報のみ、admin は全項目を編集できる。
 export const salonBasicFields=['name','prefecture','city','street','building','phone','hours','holiday','notes','description','area'];
-function salonInput(input){
+export function salonInput(input){
   const s={name:required(input?.name,80),prefecture:required(input?.prefecture,10),city:required(input?.city,50),street:required(input?.street,100),building:optional(input?.building,100),phone:required(input?.phone,15),hours:optional(input?.hours,50),holiday:optional(input?.holiday,50),notes:optional(input?.notes,500),description:optional(input?.description,120),area:optional(input?.area,60)};
   if(!/^[0-9-]+$/.test(s.phone))fail('電話番号は半角数字・ハイフンで入力してください。');
   return s;
 }
-function staffList(value,existing=[]){
+export function staffList(value,existing=[]){
   const names=Array.isArray(value)?value:String(value??'').split(/[\n,、，]/);
   const list=[];for(const raw of names){const name=String(raw).trim();if(!name)continue;if(name.length>40)fail('スタッフ名は40文字以内で入力してください。');if(list.some(s=>s.name===name))continue;list.push(existing.find(s=>s.name===name)||{id:'st-'+crypto.randomUUID().slice(0,6),name});}
   if(list.length>30)fail('スタッフは30名以内で登録してください。');
@@ -29,17 +30,21 @@ function staffList(value,existing=[]){
 // 店舗IDは削除後も再利用しない（印刷済みQRが別店舗を指さないよう、採番済みの最大値を保持する）。
 const salonSeqFrom=salons=>Math.max(salons.length,...salons.map(s=>/^S(\d+)$/.exec(s.id)?.[1]).filter(Boolean).map(Number));
 function nextSalonId(state){let n=Math.max(state.salonSeq??0,salonSeqFrom(state.salons))+1,id;while(state.salons.some(s=>s.id===(id='S'+String(n).padStart(3,'0'))))n++;state.salonSeq=n;return id;}
-const jst=iso=>new Date(new Date(iso).getTime()+9*3600000).toISOString();
+export const jst=iso=>new Date(new Date(iso).getTime()+9*3600000).toISOString();
 // 販売実績集計（仕様書 2.2.5）：期間（日次・月次・年次・任意）× 店舗別／全店舗で 販売金額（税込・送料除く）・受注件数・顧客数を集計する。
 export const salesUnits={day:'日次',month:'月次',year:'年次',range:'任意期間'};
-export function salesReport(state,input,actor,now=new Date().toISOString()){
-  const op=requireOperator(actor,['admin','salon']);
+export function salesRange(input,now=new Date().toISOString()){
   const unit=Object.hasOwn(salesUnits,String(input?.unit))?input.unit:'month';
   const day=v=>{if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v)||Number.isNaN(Date.parse(v)))fail('集計期間は YYYY-MM-DD 形式で指定してください。');return v;};
   const to=input?.to?day(input.to):jst(now).slice(0,10);
   const from=input?.from?day(input.from):new Date(Date.parse(to)-29*86400000).toISOString().slice(0,10);
   if(from>to)fail('開始日は終了日以前の日付にしてください。');
   if(Date.parse(to)-Date.parse(from)>366*3*86400000)fail('集計期間は3年以内で指定してください。');
+  return {unit,from,to};
+}
+export function salesReport(state,input,actor,now=new Date().toISOString()){
+  const op=requireOperator(actor,['admin','salon']);
+  const {unit,from,to}=salesRange(input,now);
   const salons=state.salons.filter(s=>op.role==='admin'||s.id===op.salonId);
   const orders=state.orders.filter(o=>!['cancelled','returned'].includes(o.status)&&salons.some(s=>s.id===o.salonId)&&jst(o.createdAt).slice(0,10)>=from&&jst(o.createdAt).slice(0,10)<=to);
   const bucket=o=>unit==='day'?jst(o.createdAt).slice(0,10):unit==='month'?jst(o.createdAt).slice(0,7):unit==='year'?jst(o.createdAt).slice(0,4):`${from}〜${to}`;
@@ -51,7 +56,7 @@ export function salesReport(state,input,actor,now=new Date().toISOString()){
 function log(state,actor,action,reference,now){state.events.unshift({id:crypto.randomUUID(),at:now,actor:actor?.name||'会員',action,reference});state.events=state.events.slice(0,400);}
 
 // 店舗マスタ（仕様書 2.6.1）：住所・電話番号・営業時間・定休日・備考を保持する。すべて架空。
-const seedSalons=()=>[
+export const seedSalons=()=>[
   {id:'lumiere',name:'LUMIÈRE 表参道',area:'TOKYO / OMOTESANDO',description:'髪と暮らしに、やさしい余白を。',owner:'ルミエール株式会社（架空）',prefecture:'東京都',city:'渋谷区',street:'神宮前0-0-0',building:'デモビル 2F',phone:'03-0000-0000',hours:'10:00〜20:00',holiday:'毎週火曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'haruka',name:'HARUKA'},{id:'yui',name:'YUI'}]},
   {id:'atelier',name:'atelier 凪',area:'FUKUOKA / YAKUIN',description:'あなたらしい美しさを、毎日のケアから。',owner:'アトリエ凪（架空）',prefecture:'福岡県',city:'福岡市中央区',street:'薬院0-0-0',building:'',phone:'092-000-0000',hours:'9:30〜19:00',holiday:'毎週月曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'mio',name:'MIO'},{id:'ren',name:'REN'}]},
   {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',prefecture:'山口県',city:'萩市',street:'椿東0-0-0',building:'',phone:'0838-00-0000',hours:'9:00〜18:00',holiday:'毎週月曜日・第3日曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'aoi',name:'AOI'}]},
@@ -63,12 +68,14 @@ export function migrate(state,catalog){
   for(const s of state.salons||[]){if(s.prefecture===undefined){const d=seedSalons().find(x=>x.id===s.id)||{};Object.assign(s,{prefecture:d.prefecture||'',city:d.city||'',street:d.street||'',building:d.building||'',phone:d.phone||'',hours:d.hours||'',holiday:d.holiday||'',notes:d.notes||''});changed=true;}}
   for(const p of state.profiles||[]){for(const k of ['kana','phone','gender','birthday'])if(p[k]===undefined){p[k]='';changed=true;}if(p.lineLinked===undefined){p.lineLinked=false;changed=true;}}
   if(state.salonSeq===undefined&&Array.isArray(state.salons)){state.salonSeq=salonSeqFrom(state.salons);changed=true;}
+  if(!state.carts){state.carts={};changed=true;}if(!state.favorites){state.favorites={};changed=true;}
   return changed;
 }
 
+export const seedDealers=()=>[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}];
 export function createPlatform(catalog,now=new Date().toISOString()){
   const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
-    salonSeq:3,salons:seedSalons(),dealers:[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}],profiles:[],orders:[],purchaseOrders:[],events:[]};
+    salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[]};
   // Clearly fictional examples make the management screens useful on first visit.
   for(let i=0;i<8;i++){
     const salon=state.salons[i%3],product=state.products[i%5];
@@ -93,42 +100,58 @@ function quote(state,input){
     if(p.price!==line.price)fail(`${p.name}の価格が変更されました。カートを更新してください。`,409);
     return {id:p.id,name:p.name,image:p.image,size:p.size,price:p.price,cost:p.cost,quantity:line.quantity,dealerId:p.dealerId};
   });
-  const subtotal=items.reduce((s,p)=>s+p.price*p.quantity,0),shipping=subtotal>=11000?0:660;
+  const subtotal=items.reduce((s,p)=>s+p.price*p.quantity,0),shipping=shippingFor(subtotal);
   return {items,subtotal,shipping,total:subtotal+shipping};
 }
+// 送料：注文1件660円、商品合計11,000円以上で無料（税込）。
+export const shippingFor=subtotal=>subtotal===0||subtotal>=11000?0:660;
+// 税込金額に含まれる消費税額（10%）。インボイスの税額表示に使う。
+export const includedTax=(amount,rate=10)=>Math.floor(amount*rate/(100+rate));
+export const orderFingerprint=input=>JSON.stringify({salonId:input?.salonId,items:input?.items,customer:input?.customer});
+export function requestKeyOf(input){const key=required(input?.requestKey,80);if(!/^[a-f0-9-]{36}$/i.test(key))fail('注文番号の形式が正しくありません。');return key;}
+export function orderCustomer(input,member){const customer={name:required(input?.customer?.name,80),address:required(input?.customer?.address,250),postal:required(input?.customer?.postal,8),email:member.email};if(!/^\d{3}-?\d{4}$/.test(customer.postal))fail('郵便番号を7桁で入力してください。');return customer;}
+export const newOrderId=now=>'SS-'+now.slice(2,10).replaceAll('-','')+'-'+crypto.randomUUID().slice(0,5).toUpperCase();
+export const purchaseOrderId=(orderId,index)=>'PO-'+orderId.slice(3)+'-'+(index+1);
+export const feeOf=(subtotal,feeRate)=>Math.round(subtotal*feeRate/100);
+export const PO_TRANSITIONS={pending:'accepted',accepted:'shipped',shipped:'delivered'};
+// 注文の状態は、仕入先別の発注の状態から決まる（キャンセル・返品系は別管理）。
+export function orderStatusFrom(poStatusList){const all=s=>poStatusList.every(p=>s.includes(p)),some=s=>poStatusList.some(p=>s.includes(p));return all(['delivered'])?'delivered':all(['shipped','delivered'])?'shipped':some(['shipped','delivered'])?'partially_shipped':some(['accepted'])?'processing':'ordered';}
+export function validateTracking(input){const tracking=required(input?.tracking,60);if(!/^[A-Za-z0-9-]+$/.test(tracking))fail('追跡番号は半角英数字・ハイフンで入力してください。');return {tracking,carrier:required(input?.carrier,40)};}
+// カート・お気に入りの入力検証（会員ごとにサーバーへ保存する）。
+export function cartInput(input,isSellable){const entries=Object.entries(input?.items&&typeof input.items==='object'&&!Array.isArray(input.items)?input.items:{});if(entries.length>50)fail('カートに入れられる商品は50種類までです。');const items={};for(const [id,quantity] of entries){if(!isSellable(id))continue;items[id]=int(quantity,1,99);}return items;}
+export function favoritesInput(input,exists){const ids=Array.isArray(input?.ids)?input.ids:[];if(ids.length>200)fail('お気に入りは200件までです。');return [...new Set(ids.filter(id=>typeof id==='string'&&exists(id)))];}
 function cleanQuote(value){return {...value,items:value.items.map(({cost,...p})=>p)};}
 function currentProfile(state,member){return member&&state.profiles.find(p=>p.id===member.id);}
 function placeOrder(state,input,actor,now,effects=[]){
   const member=actor.member;if(!member)fail('会員ログインが必要です。',401);
-  const key=required(input?.requestKey,80);if(!/^[a-f0-9-]{36}$/i.test(key))fail('注文番号の形式が正しくありません。');
-  const fingerprint=JSON.stringify({salonId:input.salonId,items:input.items,customer:input.customer});
+  const key=requestKeyOf(input),fingerprint=orderFingerprint(input);
   const old=state.orders.find(o=>o.requestKey===key);
   if(old){if(old.memberId!==member.id)fail('この注文は取得できません。',403);if(old.fingerprint!==fingerprint)fail('同じ注文番号で内容を変更できません。カートを確認してください。',409);return old;}
   const profile=currentProfile(state,member);if(!profile||profile.salonId!==input.salonId)fail('マイページでご利用サロンを確認してください。',409);
-  const customer={name:required(input.customer?.name,80),address:required(input.customer?.address,250),postal:required(input.customer?.postal,8),email:member.email};
-  if(!/^\d{3}-?\d{4}$/.test(customer.postal))fail('郵便番号を7桁で入力してください。');
+  const customer=orderCustomer(input,member);
   const q=quote(state,input),salon=salonFor(state,input.salonId),staff=salon.staff.find(s=>s.id===profile.staffId);
-  const id='SS-'+now.slice(2,10).replaceAll('-','')+'-'+crypto.randomUUID().slice(0,5).toUpperCase();
-  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,status:'ordered',payment:'テスト決済完了',feeRate:salon.feeRate,fee:Math.round(q.subtotal*salon.feeRate/100),timeline:[{at:now,label:'ご注文・テスト決済完了'},{at:now,label:'ディーラーへ自動発注しました'}]};
+  const id=newOrderId(now);
+  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,status:'ordered',payment:'テスト決済完了',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:'ご注文・テスト決済完了'},{at:now,label:'ディーラーへ自動発注しました'}]};
   state.orders.unshift(order);
   const groups=[...new Set(q.items.map(p=>p.dealerId))];
-  groups.forEach((dealerId,index)=>{const items=q.items.filter(p=>p.dealerId===dealerId);state.purchaseOrders.unshift({id:'PO-'+id.slice(3)+'-'+(index+1),orderId:id,dealerId,salonId:salon.id,createdAt:now,status:'pending',items:clone(items),shipping:index===0?q.shipping:0,total:items.reduce((s,p)=>s+p.cost*p.quantity,0)+(index===0?q.shipping:0),tracking:'',carrier:''});});
+  groups.forEach((dealerId,index)=>{const items=q.items.filter(p=>p.dealerId===dealerId);state.purchaseOrders.unshift({id:purchaseOrderId(id,index),orderId:id,dealerId,salonId:salon.id,createdAt:now,status:'pending',items:clone(items),shipping:index===0?q.shipping:0,total:items.reduce((s,p)=>s+p.cost*p.quantity,0)+(index===0?q.shipping:0),tracking:'',carrier:''});});
   q.items.forEach(line=>{state.products.find(p=>p.id===line.id).stock-=line.quantity;});
+  if(state.carts)delete state.carts[member.id];
   log(state,member,'受注・仕入先への自動発注',id,now);effects.push({type:'order_placed',orderId:id,memberId:member.id});return order;
 }
 function refreshOrder(state,order){
   if(['cancelled','returned','return_requested'].includes(order.status))return;
   const pos=state.purchaseOrders.filter(p=>p.orderId===order.id);
-  order.status=pos.every(p=>p.status==='delivered')?'delivered':pos.every(p=>['shipped','delivered'].includes(p.status))?'shipped':pos.some(p=>['shipped','delivered'].includes(p.status))?'partially_shipped':pos.some(p=>p.status==='accepted')?'processing':'ordered';
+  order.status=orderStatusFrom(pos.map(p=>p.status));
 }
 function customerOrder(state,order){
   const {fingerprint,requestKey,fee,feeRate,...safe}=order;
   return {...clone(safe),items:safe.items.map(({cost,...p})=>p),shipments:state.purchaseOrders.filter(p=>p.orderId===order.id).map(p=>({id:p.id,dealerId:p.dealerId,dealerName:state.dealers.find(d=>d.id===p.dealerId)?.name,status:p.status,carrier:p.carrier,tracking:p.tracking,shippedAt:p.shippedAt,items:p.items.map(({id,name,quantity})=>({id,name,quantity}))}))};
 }
-function requireOperator(actor,roles=['admin','salon','dealer']){if(!actor.operator)fail('管理ログインが必要です。',401);if(!roles.includes(actor.operator.role))fail('この操作の権限がありません。',403);return actor.operator;}
-function allowedOrder(actor,order){const op=actor.operator;return op&&(op.role==='admin'||op.role==='salon'&&op.salonId===order.salonId);}
+export function requireOperator(actor,roles=['admin','salon','dealer']){if(!actor.operator)fail('管理ログインが必要です。',401);if(!roles.includes(actor.operator.role))fail('この操作の権限がありません。',403);return actor.operator;}
+export function allowedOrder(actor,order){const op=actor.operator;return op&&(op.role==='admin'||op.role==='salon'&&op.salonId===order.salonId);}
 function restore(state,order){if(order.stockRestored)return;order.items.forEach(p=>{state.products.find(item=>item.id===p.id).stock+=p.quantity;});order.stockRestored=true;}
-function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.cost*p.quantity,0),voided=['cancelled','returned'].includes(order.status);return {orderId:order.id,salonId:order.salonId,salonName:order.salonName,at:order.createdAt,status:order.status,sales:voided?0:order.subtotal,purchase:voided?0:purchase,fee:voided?0:order.fee,proceeds:voided?0:order.subtotal-purchase-order.fee,refunded:voided?order.total:0,pending:order.status==='return_requested'};}
+export function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.cost*p.quantity,0),voided=['cancelled','returned'].includes(order.status);return {orderId:order.id,salonId:order.salonId,salonName:order.salonName,at:order.createdAt,status:order.status,sales:voided?0:order.subtotal,purchase:voided?0:purchase,fee:voided?0:order.fee,proceeds:voided?0:order.subtotal-purchase-order.fee,refunded:voided?order.total:0,pending:order.status==='return_requested'};}
 
 // effects には、実際に状態が変わったときだけ通知などの副作用の種類を積む（再送・同一状態への更新では積まない）。
 export function platformRequest(state,route,method='GET',input,actor={},now=new Date().toISOString(),effects=[]){
@@ -144,6 +167,14 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(input.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
     const profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
     state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',profile.id,now);return clone(profile);
+  }
+  if(route==='/cart'||route==='/favorites'){
+    if(!actor.member)fail('会員ログインが必要です。',401);
+    const sellable=id=>state.products.some(p=>p.id===id&&p.enabled),key=actor.member.id;
+    if(route==='/cart'&&method==='GET')return {items:Object.fromEntries(Object.entries(state.carts?.[key]||{}).filter(([id])=>sellable(id)))};
+    if(route==='/cart'&&method==='PUT'){state.carts??={};const items=cartInput(input,sellable);if(Object.keys(items).length)state.carts[key]=items;else delete state.carts[key];return {items:clone(items)};}
+    if(route==='/favorites'&&method==='GET')return {ids:(state.favorites?.[key]||[]).filter(id=>state.products.some(p=>p.id===id))};
+    if(route==='/favorites'&&method==='PUT'){state.favorites??={};const ids=favoritesInput(input,id=>state.products.some(p=>p.id===id));state.favorites[key]=ids;return {ids:[...ids]};}
   }
   if(route==='/quote'&&method==='POST'){if(!actor.member)fail('会員ログインが必要です。',401);return cleanQuote(quote(state,input));}
   if(route==='/admin/sales'&&method==='POST')return salesReport(state,input,actor,now);
@@ -179,10 +210,9 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   if(poAction&&method==='PATCH'){
     const op=requireOperator(actor,['admin','dealer']),po=state.purchaseOrders.find(p=>p.id===poAction[1]);if(!po)fail('発注が見つかりません。',404);if(op.role==='dealer'&&po.dealerId!==op.dealerId)fail('他社の発注は操作できません。',403);
     const order=state.orders.find(o=>o.id===po.orderId);if(['return_requested','returned','cancelled'].includes(order.status))fail('この注文の出荷状態は変更できません。',409);
-    const transitions={pending:'accepted',accepted:'shipped',shipped:'delivered'};
     if(input?.status===po.status)return clone(po);
-    if(transitions[po.status]!==input?.status)fail('受付 → 出荷 → 配達完了の順に操作してください。',409);
-    if(input.status==='shipped'){const tracking=required(input.tracking,60);if(!/^[A-Za-z0-9-]+$/.test(tracking))fail('追跡番号は半角英数字・ハイフンで入力してください。');const carrier=required(input.carrier,40);po.tracking=tracking;po.carrier=carrier;po.shippedAt=now;}
+    if(PO_TRANSITIONS[po.status]!==input?.status)fail('受付 → 出荷 → 配達完了の順に操作してください。',409);
+    if(input.status==='shipped'){const {tracking,carrier}=validateTracking(input);po.tracking=tracking;po.carrier=carrier;po.shippedAt=now;}
     po.status=input.status;if(po.status==='shipped')effects.push({type:'shipped',purchaseOrderId:po.id,orderId:order.id,memberId:order.memberId});refreshOrder(state,order);order.timeline.push({at:now,label:`${state.dealers.find(d=>d.id===po.dealerId).short}：${poStatuses[po.status]}`});log(state,op,poStatuses[po.status],po.id,now);return clone(po);
   }
   const returnAction=route.match(/^\/admin\/orders\/([^/]+)\/refund$/);
@@ -201,7 +231,9 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   // 店舗登録（仕様書 2.1.1 / AD-002）：店舗IDは自動採番。QRコードは店舗IDから都度生成する。
   if(route==='/admin/salons'&&method==='POST'){
     const op=requireOperator(actor,['admin']);
-    const salon={id:nextSalonId(state),...salonInput(input),owner:required(input?.owner,100),feeRate:int(input?.feeRate??5,0,30),enabled:input?.enabled!==false,staff:staffList(input?.staff)};
+    // 入力をすべて検証してから店舗IDを採番する（検証エラーで番号を消費しない）
+    const fields={...salonInput(input),owner:required(input?.owner,100),feeRate:int(input?.feeRate??5,0,30),enabled:input?.enabled!==false,staff:staffList(input?.staff)};
+    const salon={id:nextSalonId(state),...fields};
     state.salons.push(salon);log(state,op,'店舗を登録',salon.id,now);return clone(salon);
   }
   const salonAction=route.match(/^\/admin\/salons\/([^/]+)$/);

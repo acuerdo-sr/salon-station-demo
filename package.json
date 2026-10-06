@@ -11,6 +11,7 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
+    "mysql2": "^3.24.5",
     "qrcode-generator": "2.0.4"
   }
 }

@@ -1,0 +1,125 @@
+-- SALON STATION テーブル定義（SQLite）。MySQL 8.0 用は schema.mysql.sql（同じ表・列）。
+-- 金額は円の整数（税込）、日時は UTC の ISO 8601 文字列、ordered_on は日本時間の注文日（集計用）。
+
+CREATE TABLE IF NOT EXISTS app_meta (meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
+
+-- 店舗・スタッフ・仕入先
+CREATE TABLE IF NOT EXISTS dealers (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, short_name TEXT NOT NULL,
+  area TEXT NOT NULL DEFAULT '', lead_time TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS salons (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL,
+  area TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+  prefecture TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', street TEXT NOT NULL DEFAULT '', building TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '', hours TEXT NOT NULL DEFAULT '', holiday TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  fee_rate INTEGER NOT NULL DEFAULT 5 CHECK (fee_rate BETWEEN 0 AND 30),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS staff (
+  id TEXT PRIMARY KEY, salon_id TEXT NOT NULL REFERENCES salons(id), name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS staff_salon ON staff(salon_id, active, sort_order);
+
+-- 商品・カテゴリ・お悩み
+CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, sort_order INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS concerns (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, sort_order INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS products (
+  id TEXT PRIMARY KEY, sku TEXT NOT NULL UNIQUE, brand TEXT NOT NULL, name TEXT NOT NULL,
+  category_id TEXT NOT NULL REFERENCES categories(id), size TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+  image TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '',
+  price INTEGER NOT NULL CHECK (price BETWEEN 1 AND 1000000), cost INTEGER NOT NULL CHECK (cost >= 0),
+  tax_rate INTEGER NOT NULL DEFAULT 10, dealer_id TEXT NOT NULL REFERENCES dealers(id),
+  stock INTEGER NOT NULL CHECK (stock >= 0), enabled INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS products_dealer ON products(dealer_id);
+CREATE TABLE IF NOT EXISTS product_concerns (
+  product_id TEXT NOT NULL REFERENCES products(id), concern_id TEXT NOT NULL REFERENCES concerns(id),
+  PRIMARY KEY (product_id, concern_id));
+
+-- 会員（担当店舗・担当スタッフ・LINE ID を含む）
+CREATE TABLE IF NOT EXISTS members (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL,
+  name TEXT NOT NULL, kana TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', gender TEXT NOT NULL DEFAULT '', birthday TEXT NOT NULL DEFAULT '',
+  line_id TEXT UNIQUE, salon_id TEXT REFERENCES salons(id), staff_id TEXT REFERENCES staff(id), salon_linked_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS members_salon ON members(salon_id);
+CREATE TABLE IF NOT EXISTS member_sessions (
+  token_hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS member_sessions_member ON member_sessions(member_id);
+CREATE TABLE IF NOT EXISTS member_addresses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, postal TEXT NOT NULL, address TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS member_addresses_member ON member_addresses(member_id, is_default);
+
+-- 管理者（本部・美容室・ディーラー）
+CREATE TABLE IF NOT EXISTS operators (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin','salon','dealer')),
+  salon_id TEXT REFERENCES salons(id), dealer_id TEXT REFERENCES dealers(id),
+  password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS operator_sessions (
+  token_hash TEXT PRIMARY KEY, operator_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
+
+-- 購入前（端末をまたぐカートとお気に入り）
+CREATE TABLE IF NOT EXISTS cart_items (
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, product_id TEXT NOT NULL REFERENCES products(id),
+  quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 99), updated_at TEXT NOT NULL,
+  PRIMARY KEY (member_id, product_id));
+CREATE TABLE IF NOT EXISTS favorites (
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, product_id TEXT NOT NULL REFERENCES products(id),
+  created_at TEXT NOT NULL, PRIMARY KEY (member_id, product_id));
+
+-- 注文（注文時点の価格・店舗・担当者・お届け先を写して保存する）
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL,
+  member_id TEXT NOT NULL REFERENCES members(id), salon_id TEXT NOT NULL REFERENCES salons(id),
+  salon_name TEXT NOT NULL, seller TEXT NOT NULL, staff_id TEXT NOT NULL DEFAULT '', staff_name TEXT NOT NULL,
+  fee_rate INTEGER NOT NULL, fee INTEGER NOT NULL, subtotal INTEGER NOT NULL, shipping INTEGER NOT NULL, total INTEGER NOT NULL, tax_total INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('ordered','processing','partially_shipped','shipped','delivered','cancelled','return_requested','returned')),
+  payment_status TEXT NOT NULL CHECK (payment_status IN ('captured','refunded')),
+  ship_name TEXT NOT NULL, ship_postal TEXT NOT NULL, ship_address TEXT NOT NULL, ship_email TEXT NOT NULL,
+  return_reason TEXT, stock_restored INTEGER NOT NULL DEFAULT 0, is_sample INTEGER NOT NULL DEFAULT 0,
+  ordered_on TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS orders_salon_date ON orders(salon_id, ordered_on);
+CREATE INDEX IF NOT EXISTS orders_member ON orders(member_id, created_at);
+CREATE INDEX IF NOT EXISTS orders_created ON orders(created_at);
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id), dealer_id TEXT NOT NULL REFERENCES dealers(id),
+  salon_id TEXT NOT NULL REFERENCES salons(id), seq INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','accepted','shipped','delivered','cancelled','returned')),
+  shipping INTEGER NOT NULL, total INTEGER NOT NULL, carrier TEXT NOT NULL DEFAULT '', tracking TEXT NOT NULL DEFAULT '',
+  shipped_at TEXT, delivered_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS purchase_orders_order ON purchase_orders(order_id);
+CREATE INDEX IF NOT EXISTS purchase_orders_dealer ON purchase_orders(dealer_id, status, created_at);
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id),
+  purchase_order_id TEXT NOT NULL REFERENCES purchase_orders(id), line_no INTEGER NOT NULL,
+  product_id TEXT NOT NULL, sku TEXT NOT NULL, name TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '',
+  unit_price INTEGER NOT NULL, unit_cost INTEGER NOT NULL, quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 99),
+  tax_rate INTEGER NOT NULL, dealer_id TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS order_items_order ON order_items(order_id, line_no);
+CREATE TABLE IF NOT EXISTS order_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id), occurred_at TEXT NOT NULL, label TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS order_events_order ON order_events(order_id, id);
+
+-- 決済・返金（カード情報は持たず、決済代行の取引IDと状態だけを保存する）
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id), provider TEXT NOT NULL,
+  provider_payment_id TEXT NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS payments_order ON payments(order_id);
+CREATE TABLE IF NOT EXISTS refunds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id), amount INTEGER NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+
+-- 在庫の増減履歴・操作履歴・通知の送信記録
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, product_id TEXT NOT NULL REFERENCES products(id), delta INTEGER NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('initial','order','cancel','return','adjust')), reference TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT '', occurred_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS stock_movements_product ON stock_movements(product_id, id);
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, reference TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, member_id TEXT NOT NULL, channel TEXT NOT NULL, kind TEXT NOT NULL, reference TEXT NOT NULL,
+  status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (channel, kind, reference));
