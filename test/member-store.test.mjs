@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMemberStore, SESSION_AGE } from '../dist/member-store.js';
 const memory = () => { const data = new Map(); return { getItem: k => data.get(k) ?? null, setItem: (k, v) => data.set(k, v), removeItem: k => data.delete(k) }; };
-const profile = email => ({ salon: 'テストサロン', name: 'テスト担当', email, password: 'Demo-Member-2026' });
+const profile = email => ({ salon: 'テストサロン', name: 'テスト担当', email, password: 'Demo-Member-2026', agreePrivacy: true });
 
 test('Pages membership registration, login, editing, expiry and password handling', async () => {
   const data = memory(), session = memory(); let now = Date.now();

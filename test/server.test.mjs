@@ -36,7 +36,7 @@ function splitBodyRequest(route, json, cookie) {
 test('server: closed store, member sessions, origin checks, UTF-8 bodies, login throttling and persistence', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-server-test-'));
   let child;
-  const details = email => ({ salon: 'テスト会員サロン', name: '会員担当', email, password: 'Demo-Member-2026' });
+  const details = email => ({ salon: 'テスト会員サロン', name: '会員担当', email, password: 'Demo-Member-2026', agreePrivacy: true });
   const order = (items = [{ id: 'shampoo-moist', price: 2860, quantity: 1 }]) => ({ salonId: 'lumiere', items, customer: { name: 'デモ 花子', postal: '0000000', address: '架空県 1-2-3' }, requestKey: randomUUID() });
   try {
     child = await start(dir);
@@ -51,7 +51,10 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
     });
     let cookieA, memberA, orderA;
     await t.test('member sessions isolate orders, reject forged identity and invalidate logout', async () => {
+      // お客様情報の取り扱いへの同意がないと登録できない。同意した版を記録する
+      assert.equal((await call('/auth/register', 'POST', { ...details('nc@example.test'), agreePrivacy: false })).status, 400);
       const a = await call('/auth/register', 'POST', details('a@example.test'));
+      assert.equal(a.body.member.privacyVersion, '2026-10'); assert.ok(a.body.member.privacyAgreedAt);
       assert.equal(a.status, 200); assert.match(a.cookie, /HttpOnly/); assert.match(a.cookie, /SameSite=Strict/); assert.doesNotMatch(a.cookie, /Secure/);
       cookieA = a.cookie.split(';')[0]; memberA = a.body.member;
       assert.equal(memberA.hash, undefined);
@@ -113,7 +116,7 @@ test('server: behind a trusted proxy the client address comes from X-Forwarded-F
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-server-proxy-'));
   const child = await start(dir, { TRUST_PROXY: '1', PUBLIC_ORIGIN: 'https://shop.example.test' });
   try {
-    const register = await call('/auth/register', 'POST', { salon: 'x', name: 'x', email: 'p@example.test', password: 'Demo-Member-2026' });
+    const register = await call('/auth/register', 'POST', { salon: 'x', name: 'x', email: 'p@example.test', password: 'Demo-Member-2026', agreePrivacy: true });
     assert.match(register.cookie, /Secure/);
     const from = ip => ({ 'X-Forwarded-For': ip });
     for (let i = 0; i < 10; i++) await call('/auth/login', 'POST', { email: 'p@example.test', password: 'bad-password-' + i }, '', from('203.0.113.1'));

@@ -64,7 +64,9 @@ test('legacy single-JSON database is migrated into the new tables without losing
       const snap = await store.request('/admin/snapshot', 'GET', undefined, admin);
       assert.equal(snap.orders.length, 9); assert.equal(snap.products.find(p => p.id === 'oil-smooth').stock, oilStock);
       assert.ok(snap.events.some(e => e.action === '店舗を削除'));
-      assert.equal(snap.profiles.find(p => p.id === 'old-member').lineLinked, true);
+      // 本部には会員の一覧を渡さず、店舗ごとの集計だけを返す。会員の詳細は担当サロンだけが見られる
+      assert.deepEqual(snap.profiles, []); assert.equal(snap.customerStats.find(s => s.salonId === 'lumiere').lineLinked, 1);
+      assert.equal((await store.request('/admin/snapshot', 'GET', undefined, { operator: demoOperators[1] })).profiles.find(p => p.id === 'old-member').lineLinked, true);
       assert.equal((await store.request('/admin/salons', 'POST', { name: '新店', owner: 'x', prefecture: '山口県', city: '萩市', street: '1', phone: '0838-00-0000' }, admin, now)).id, 'S005');
       // 管理アカウントでログインできる（パスワードはテーブルに保存）
       assert.equal(Number((await db.get('SELECT COUNT(*) AS n FROM operators')).n), 4);
@@ -121,7 +123,8 @@ test('a database created by the previous version gains wholesale prices, operato
     assert.ok((await db.tableColumns('operators')).includes('line_id'));
     for (const table of ['supply_orders', 'supply_order_items', 'supply_subscriptions', 'supply_subscription_items', 'invoices']) assert.equal(await db.tableExists(table), true, table);
     assert.equal(Number((await db.get("SELECT wholesale_price FROM products WHERE id='shampoo-moist'")).wholesale_price), 1859);
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '2');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '3');
+    assert.ok((await db.tableColumns('members')).includes('privacy_version'));
     const salonOp = { operator: demoOperators[1] }, ws = await store.request('/supply', 'GET', undefined, salonOp, now);
     assert.deepEqual(ws.orders, []);
     const o = await store.request('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity: 1, price: 1859 }] }, salonOp, now);

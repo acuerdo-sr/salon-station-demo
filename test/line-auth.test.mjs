@@ -58,7 +58,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal((await call('/auth/me','GET',undefined,again.cookie)).body.member.id,me.id);
     assert.equal((await call('/auth/login','POST',{email:me.email,password:'Demo-Member-2026'})).status,400);
     // 連携の乗っ取り防止：攻撃者が開始した連携URLを別のブラウザ（被害者）が完了しても、攻撃者の会員にLINEは連携されない
-    const mail=await call('/auth/register','POST',{name:'メール会員',salon:'LUMIÈRE',email:'mail@example.test',password:'Demo-Member-2026'});
+    const mail=await call('/auth/register','POST',{name:'メール会員',salon:'LUMIÈRE',email:'mail@example.test',password:'Demo-Member-2026',agreePrivacy:true});
     assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:''},mail.cookie)).status,200);
     const attackerFlow=await begin(mail.cookie);
     const hijack=await finish(attackerFlow.state,'');
@@ -75,7 +75,9 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal((await call('/auth/profile','PATCH',{name:'メール会員 改','salon':'LUMIÈRE'},linked.cookie)).body.member.lineId,'U-link');
     // 紐付け後にLINE連携した会員も、管理画面では「連携済み」と表示される
     const admin=await call('/platform/operator/login','POST',{email:'admin@example.test',password:'Demo-Admin-2026'});
-    assert.equal((await call('/platform/admin/snapshot','GET',undefined,admin.cookie)).body.profiles.find(p=>p.id===mail.body.member.id).lineLinked,true);
+    const salonStaff=await call('/platform/operator/login','POST',{email:'salon@example.test',password:'Demo-Admin-2026'});
+    assert.equal((await call('/platform/admin/snapshot','GET',undefined,salonStaff.cookie)).body.profiles.find(p=>p.id===mail.body.member.id).lineLinked,true);
+    assert.ok((await call('/platform/admin/snapshot','GET',undefined,admin.cookie)).body.customerStats.find(s=>s.salonId==='lumiere').lineLinked>=1);
     // LIFF：不正トークンは拒否、正しいトークンで会員作成
     assert.equal((await call('/auth/line/liff','POST',{idToken:'not-a-token'})).status,502);
     assert.equal((await call('/auth/line/liff','POST',{})).status,400);
@@ -99,7 +101,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal(pushes[1].body.to,'U-liff');assert.ok(pushes[1].body.messages[0].text.includes('LINE-123'));
     assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'LINE-123'},admin.cookie)).status,200);
     // 未連携会員の注文は通知しない
-    const plain=await call('/auth/register','POST',{name:'未連携',salon:'LUMIÈRE',email:'plain@example.test',password:'Demo-Member-2026'});
+    const plain=await call('/auth/register','POST',{name:'未連携',salon:'LUMIÈRE',email:'plain@example.test',password:'Demo-Member-2026',agreePrivacy:true});
     await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:''},plain.cookie);
     assert.equal((await call('/platform/orders','POST',orderInput(),plain.cookie)).status,200);
     await new Promise(resolve=>setTimeout(resolve,300));assert.equal(pushes.length,2,JSON.stringify(pushes.map(p=>p.body.messages[0].text)));

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS members (
   id VARCHAR(40) PRIMARY KEY, email VARCHAR(150) NOT NULL UNIQUE, password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL,
   name VARCHAR(80) NOT NULL, kana VARCHAR(50) NOT NULL DEFAULT '', phone VARCHAR(15) NOT NULL DEFAULT '', gender VARCHAR(1) NOT NULL DEFAULT '', birthday VARCHAR(10) NOT NULL DEFAULT '',
   line_id VARCHAR(100) NULL UNIQUE, salon_id VARCHAR(20) NULL, staff_id VARCHAR(40) NULL, salon_linked_at VARCHAR(30) NULL,
+  privacy_version VARCHAR(20) NULL, privacy_agreed_at VARCHAR(30) NULL,
   created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY members_salon (salon_id), FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (staff_id) REFERENCES staff(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

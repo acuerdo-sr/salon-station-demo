@@ -1,4 +1,5 @@
 // Demonstration membership. Pages storage is not a security boundary.
+import { privacyConsent } from './privacy.js';
 export const SESSION_AGE = 24 * 60 * 60 * 1000;
 const ITERATIONS = 600000;
 const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
@@ -39,8 +40,8 @@ export async function passwordDigest(password, salt = hex(crypto.getRandomValues
 
 export function publicMember(member) {
   if (!member) return null;
-  const { id, salon, name, email, createdAt, kana = '', phone = '', gender = '', birthday = '', lineId = '' } = member;
-  return { id, salon, name, email, createdAt, kana, phone, gender, birthday, lineId };
+  const { id, salon, name, email, createdAt, kana = '', phone = '', gender = '', birthday = '', lineId = '', privacyVersion = '', privacyAgreedAt = '' } = member;
+  return { id, salon, name, email, createdAt, kana, phone, gender, birthday, lineId, privacyVersion, privacyAgreedAt };
 }
 
 export function createMemberStore(storage, sessions, key, now = Date.now) {
@@ -73,12 +74,13 @@ export function createMemberStore(storage, sessions, key, now = Date.now) {
       if (route === '/auth/register' && method === 'POST') {
         const profile = validateMember(input);
         validatePassword(input.password);
+        const consent = privacyConsent(input);
         if (read().some(m => m.email === profile.email)) throw Error('このデモ用メールアドレスは登録済みです。ログインしてください。');
         const digest = await passwordDigest(input.password);
         // Re-read after hashing so registrations from another tab are retained.
         const members = read();
         if (members.some(m => m.email === profile.email)) throw Error('このデモ用メールアドレスは登録済みです。');
-        const member = { id: crypto.randomUUID(), ...profile, ...digest, createdAt: new Date(now()).toISOString() };
+        const member = { id: crypto.randomUUID(), ...profile, ...digest, privacyVersion: consent.version, privacyAgreedAt: new Date(now()).toISOString(), createdAt: new Date(now()).toISOString() };
         // Check session storage availability before persisting the registration.
         sessions.setItem(sessionKey, JSON.stringify({ id: member.id, expiresAt: now() + SESSION_AGE }));
         try { write([...members, member]); } catch (error) { sessions.removeItem(sessionKey); throw error; }
@@ -97,7 +99,8 @@ export function createMemberStore(storage, sessions, key, now = Date.now) {
         // 公開デモ専用：LINEログインの体験。LINEとは通信せず、架空のLINE IDで会員を作成する。
         const lineId = 'Udemo' + crypto.randomUUID().replace(/-/g, '').slice(0, 27);
         const salon = typeof input?.salon === 'string' && input.salon.trim() ? input.salon.trim().slice(0, 80) : 'LINE登録';
-        const member = { id: crypto.randomUUID(), salon, name: 'LINE デモ会員', email: `line-${lineId.slice(5, 15).toLowerCase()}@example.test`, salt: '', hash: '', kana: '', phone: '', gender: '', birthday: '', lineId, createdAt: new Date(now()).toISOString() };
+        const consent = privacyConsent(input);
+        const member = { id: crypto.randomUUID(), salon, name: 'LINE デモ会員', email: `line-${lineId.slice(5, 15).toLowerCase()}@example.test`, salt: '', hash: '', kana: '', phone: '', gender: '', birthday: '', lineId, privacyVersion: consent.version, privacyAgreedAt: new Date(now()).toISOString(), createdAt: new Date(now()).toISOString() };
         const members = read();
         sessions.setItem(sessionKey, JSON.stringify({ id: member.id, expiresAt: now() + SESSION_AGE }));
         try { write([...members, member]); } catch (error) { sessions.removeItem(sessionKey); throw error; }

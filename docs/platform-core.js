@@ -1,5 +1,6 @@
 // Shared business rules for the local server and the browser-only public demo.
 import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf } from './supply-core.js';
+import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js';
 export const demoOperators = [
   {id:'admin',role:'admin',name:'運営管理者',email:'admin@example.test'},
   {id:'salon-a',role:'salon',salonId:'lumiere',name:'LUMIÈRE 店舗担当',email:'salon@example.test'},
@@ -54,7 +55,7 @@ export function salesReport(state,input,actor,now=new Date().toISOString()){
   const rows=periods.map(period=>{const inPeriod=orders.filter(o=>bucket(o)===period);return {period,salons:salons.map(s=>({salonId:s.id,salonName:s.name,...summarize(inPeriod.filter(o=>o.salonId===s.id))})),total:summarize(inPeriod)};});
   return {from,to,unit,unitName:salesUnits[unit],rows,salons:salons.map(s=>({salonId:s.id,salonName:s.name,...summarize(orders.filter(o=>o.salonId===s.id))})),total:summarize(orders)};
 }
-function log(state,actor,action,reference,now){state.events.unshift({id:crypto.randomUUID(),at:now,actor:actor?.name||'会員',action,reference});state.events=state.events.slice(0,400);}
+function log(state,actor,action,reference,now){state.events.unshift({id:crypto.randomUUID(),at:now,actor:actorLabel(actor),action,reference});state.events=state.events.slice(0,400);}
 
 // 店舗マスタ（仕様書 2.6.1）：住所・電話番号・営業時間・定休日・備考を保持する。すべて架空。
 export const seedSalons=()=>[
@@ -170,7 +171,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(!previous&&!salon.enabled)fail('このサロンは現在ご利用いただけません。');
     if(input.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
     const profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
-    state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',profile.id,now);return clone(profile);
+    state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',memberRef(profile.id),now);return clone(profile);
   }
   if(route==='/cart'||route==='/favorites'){
     if(!actor.member)fail('会員ログインが必要です。',401);
@@ -206,9 +207,11 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const orders=state.orders.filter(o=>allowedOrder(actor,o)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
     pos.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
     return {operator:clone(op),revision:state.revision,products:clone(state.products.filter(p=>op.role!=='dealer'||p.dealerId===op.dealerId)),salons:clone(state.salons.filter(s=>op.role==='admin'||op.role==='salon'&&s.id===op.salonId||op.role==='dealer'&&pos.some(p=>p.salonId===s.id))),dealers:clone(state.dealers.filter(d=>op.role!=='dealer'||d.id===op.dealerId)),
-      orders:orders.map(o=>({...customerOrder(state,o),fee:o.fee,items:clone(o.items)})),
-      purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:clone(o.customer)};}),
-      profiles:op.role==='dealer'?[]:clone(state.profiles.filter(p=>op.role==='admin'||p.salonId===op.salonId)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
+      // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（privacy.js）
+      orders:orders.map(o=>orderForRole(op.role,{...customerOrder(state,o),fee:o.fee,items:clone(o.items)})),
+      purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:customerFor(op.role,clone(o.customer),o.memberId)};}),
+      profiles:op.role==='salon'?clone(state.profiles.filter(p=>p.salonId===op.salonId)).map(p=>({...p,ref:memberRef(p.id)})):[],
+      customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
   }
   const poAction=route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
   if(poAction&&method==='PATCH'){
@@ -257,9 +260,9 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   // 担当店舗紐付けの変更（仕様書 2.2.4 / AD-005）
   const memberAction=route.match(/^\/admin\/members\/([^/]+)$/);
   if(memberAction&&method==='PATCH'){
-    const op=requireOperator(actor,['admin']),profile=state.profiles.find(p=>p.id===memberAction[1]);if(!profile)fail('会員が見つかりません。',404);
+    const op=requireOperator(actor,['admin']),key=decodeURIComponent(memberAction[1]).trim().toUpperCase(),matches=state.profiles.filter(p=>p.id===memberAction[1]||memberRef(p.id)===key);if(matches.length!==1)fail('会員番号に該当する会員が見つかりません。',404);const profile=matches[0];
     const salon=salonFor(state,input?.salonId);if(!salon.enabled&&salon.id!==profile.salonId)fail('受付を停止しているサロンには紐付けできません。',409);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
-    profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',profile.id,now);return clone(profile);
+    profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',memberRef(profile.id),now);return {ref:memberRef(profile.id),salonId:profile.salonId,staffId:profile.staffId};
   }
   // 加盟店からの仕入発注・定期発注・月次請求（supply-core.js）
   const supply=supplyRequest(state,route,method,input,actor,now,effects);if(supply!==undefined)return supply;

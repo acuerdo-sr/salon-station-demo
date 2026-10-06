@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL,
   name TEXT NOT NULL, kana TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', gender TEXT NOT NULL DEFAULT '', birthday TEXT NOT NULL DEFAULT '',
   line_id TEXT UNIQUE, salon_id TEXT REFERENCES salons(id), staff_id TEXT REFERENCES staff(id), salon_linked_at TEXT,
+  privacy_version TEXT, privacy_agreed_at TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS members_salon ON members(salon_id);
 CREATE TABLE IF NOT EXISTS member_sessions (

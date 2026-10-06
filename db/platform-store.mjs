@@ -10,6 +10,7 @@ import { passwordDigest } from '../dist/member-store.js';
 import { importState } from './import-state.mjs';
 import { createSupplyStore } from './supply-store.mjs';
 import { wholesaleOf } from '../dist/supply-core.js';
+import { memberRef, actorLabel, customerFor, orderForRole } from '../dist/privacy.js';
 
 const bool = value => Boolean(Number(value));
 const num = value => Number(value || 0);
@@ -81,7 +82,8 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   function poView(p, items) {
     return { id: p.id, orderId: p.order_id, dealerId: p.dealer_id, salonId: p.salon_id, createdAt: p.created_at, status: p.status, items: items.map(i => itemFrom(i, true)), shipping: num(p.shipping), total: num(p.total), tracking: p.tracking, carrier: p.carrier, ...(p.shipped_at ? { shippedAt: p.shipped_at } : {}) };
   }
-  const actorName = actor => actor?.name || '会員';
+  // 操作履歴・在庫履歴には、お客様の氏名ではなく会員番号を残す
+  const actorName = actorLabel;
   const audit = (q, actor, action, reference, now) => q.run('INSERT INTO audit_logs (occurred_at, actor, action, reference) VALUES (?, ?, ?, ?)', [now, actorName(actor), action, reference]);
   const event = (q, orderId, label, now) => q.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [orderId, now, label]);
   const memberRow = (q, id) => q.get('SELECT * FROM members WHERE id=?', [id]);
@@ -122,7 +124,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     for (const item of [...qt.items].sort((a, b) => a.id.localeCompare(b.id))) {
       const r = await q.run('UPDATE products SET stock=stock-?, updated_at=? WHERE id=? AND enabled=1 AND stock>=?', [item.quantity, now, item.id, item.quantity]);
       if (r.changes !== 1) fail(`${item.name}の在庫が不足しています。`, 409);
-      await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'order', ?, ?, ?)", [item.id, -item.quantity, id, member.name, now]);
+      await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'order', ?, ?, ?)", [item.id, -item.quantity, id, actorName(member), now]);
     }
     await q.run(`INSERT INTO orders (id, request_key, fingerprint, member_id, salon_id, salon_name, seller, staff_id, staff_name, fee_rate, fee, subtotal, shipping, total, tax_total,
       status, payment_status, ship_name, ship_postal, ship_address, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
@@ -164,25 +166,36 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
   }
 
   // ---- 管理画面
-  async function snapshot(q, actor) {
+  // 店舗ごとの会員の集計（本部が見る値）。日本時間の当月に担当店舗へ紐付いた会員を「今月の新規」とする。
+  async function customerStats(q, salons, now) {
+    const month = jst(now).slice(0, 7), [y, m] = month.split('-').map(Number);
+    const start = new Date(`${month}-01T00:00:00+09:00`).toISOString(), end = new Date(Date.UTC(y, m, 1) - 9 * 3600000).toISOString();
+    const members = await q.all('SELECT salon_id, COUNT(*) AS members, SUM(CASE WHEN line_id IS NOT NULL THEN 1 ELSE 0 END) AS line_linked, SUM(CASE WHEN COALESCE(salon_linked_at, created_at) >= ? AND COALESCE(salon_linked_at, created_at) < ? THEN 1 ELSE 0 END) AS new_this_month FROM members WHERE salon_id IS NOT NULL GROUP BY salon_id', [start, end]);
+    const buyers = await q.all("SELECT salon_id, COUNT(*) AS purchasers, SUM(CASE WHEN n >= 2 THEN 1 ELSE 0 END) AS repeaters FROM (SELECT salon_id, member_id, COUNT(*) AS n FROM orders WHERE status NOT IN ('cancelled','returned') GROUP BY salon_id, member_id) t GROUP BY salon_id");
+    return salons.map(s => { const a = members.find(r => r.salon_id === s.id), b = buyers.find(r => r.salon_id === s.id), purchasers = num(b?.purchasers), repeaters = num(b?.repeaters);
+      return { salonId: s.id, salonName: s.name, members: num(a?.members), lineLinked: num(a?.line_linked), newThisMonth: num(a?.new_this_month), purchasers, repeaters, repeatRate: purchasers ? Math.round(repeaters / purchasers * 1000) / 10 : 0 }; });
+  }
+  async function snapshot(q, actor, now) {
     const op = requireOperator(actor);
     const scope = op.role === 'admin' ? ['', []] : op.role === 'salon' ? ['salon_id=?', [op.salonId]] : ['1=0', []];
     const dealers = await loadDealers(q, op.role === 'dealer' ? op.dealerId : null), allDealers = await loadDealers(q);
     const orders = await loadOrders(q, scope[0], scope[1], SNAPSHOT_LIMIT);
     const poScope = op.role === 'admin' ? ['', []] : op.role === 'salon' ? ['WHERE po.salon_id=?', [op.salonId]] : ['WHERE po.dealer_id=?', [op.dealerId]];
-    const poRows = await q.all(`SELECT po.*, o.salon_name, o.ship_name, o.ship_postal, o.ship_address, o.ship_email FROM purchase_orders po JOIN orders o ON o.id=po.order_id ${poScope[0]} ORDER BY po.created_at DESC, po.id DESC LIMIT ${SNAPSHOT_LIMIT}`, poScope[1]);
+    const poRows = await q.all(`SELECT po.*, o.salon_name, o.member_id, o.ship_name, o.ship_postal, o.ship_address, o.ship_email FROM purchase_orders po JOIN orders o ON o.id=po.order_id ${poScope[0]} ORDER BY po.created_at DESC, po.id DESC LIMIT ${SNAPSHOT_LIMIT}`, poScope[1]);
     const poItems = poRows.length ? await q.all(`SELECT * FROM order_items WHERE purchase_order_id IN (${marks(poRows)}) ORDER BY line_no`, poRows.map(p => p.id)) : [];
     const salonIds = op.role === 'admin' ? undefined : op.role === 'salon' ? [op.salonId] : [...new Set(poRows.map(p => p.salon_id))];
-    const memberScope = op.role === 'admin' ? ['salon_id IS NOT NULL', []] : op.role === 'salon' ? ['salon_id=?', [op.salonId]] : null;
-    const members = memberScope ? await q.all(`SELECT * FROM members WHERE ${memberScope[0]} ORDER BY salon_linked_at, id`, memberScope[1]) : [];
+    // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（dist/privacy.js）
+    const members = op.role === 'salon' ? await q.all('SELECT * FROM members WHERE salon_id=? ORDER BY salon_linked_at, id', [op.salonId]) : [];
     const views = orders.map(o => orderView(o, allDealers, true));
+    const salons = await loadSalons(q, { ids: salonIds });
     return {
       operator: op, revision: await revision(q),
       products: await loadProducts(q, { dealerId: op.role === 'dealer' ? op.dealerId : undefined, withCost: true }),
-      salons: await loadSalons(q, { ids: salonIds }), dealers,
-      orders: views,
-      purchaseOrders: poRows.map(p => ({ ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: { name: p.ship_name, address: p.ship_address, postal: p.ship_postal, email: p.ship_email } })),
-      profiles: members.map(profileFrom),
+      salons, dealers,
+      orders: views.map(o => orderForRole(op.role, o)),
+      purchaseOrders: poRows.map(p => ({ ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: p.ship_name, address: p.ship_address, postal: p.ship_postal, email: p.ship_email }, p.member_id) })),
+      profiles: members.map(m => ({ ...profileFrom(m), ref: memberRef(m.id) })),
+      customerStats: op.role === 'dealer' ? [] : await customerStats(q, salons, now),
       settlements: views.map(o => settlement(o)),
       events: op.role === 'admin' ? (await q.all('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 400')).map(e => ({ id: String(e.id), at: e.occurred_at, actor: e.actor, action: e.action, reference: e.reference })) : [],
       ...(await supply.snapshot(q, op)),
@@ -243,7 +256,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       if (!m.salon_id && !salon.enabled) fail('このサロンは現在ご利用いただけません。');
       if (input.staffId && !salon.staff.some(s => s.id === input.staffId)) fail('担当スタッフを確認してください。');
       await q.run('UPDATE members SET salon_id=?, staff_id=?, salon_linked_at=?, updated_at=? WHERE id=?', [salon.id, input.staffId || null, m.salon_linked_at || now, now, m.id]);
-      await audit(q, actor.member, '会員サロン情報を保存', m.id, now);
+      await audit(q, actor.member, '会員サロン情報を保存', memberRef(m.id), now);
       return profileFrom(await memberRow(q, m.id));
     }
     if (route === '/cart' || route === '/favorites') {
@@ -298,7 +311,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       }
       return orderById(q, order.id);
     }
-    if (route === '/admin/snapshot' && method === 'GET') return snapshot(q, actor);
+    if (route === '/admin/snapshot' && method === 'GET') return snapshot(q, actor, now);
     const poAction = route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
     if (poAction && method === 'PATCH') {
       const op = requireOperator(actor, ['admin', 'dealer']);
@@ -380,13 +393,16 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     const memberAction = route.match(/^\/admin\/members\/([^/]+)$/);
     if (memberAction && method === 'PATCH') {
       const op = requireOperator(actor, ['admin']);
-      const m = await memberRow(q, memberAction[1]); if (!m?.salon_id) fail('会員が見つかりません。', 404);
+      const key = decodeURIComponent(memberAction[1]).trim().toUpperCase();
+      const found = (await memberRow(q, memberAction[1])) ? [await memberRow(q, memberAction[1])] : (await q.all('SELECT * FROM members WHERE salon_id IS NOT NULL')).filter(r => memberRef(r.id) === key);
+      const m = found.length === 1 ? found[0] : null; if (!m?.salon_id) fail('会員番号に該当する会員が見つかりません。', 404);
       const salon = await salonById(q, input?.salonId);
       if (!salon.enabled && salon.id !== m.salon_id) fail('受付を停止しているサロンには紐付けできません。', 409);
       if (input?.staffId && !salon.staff.some(s => s.id === input.staffId)) fail('担当スタッフを確認してください。');
       await q.run('UPDATE members SET salon_id=?, staff_id=?, updated_at=? WHERE id=?', [salon.id, input?.staffId || null, now, m.id]);
-      await audit(q, op, '会員の担当店舗を変更', m.id, now);
-      return profileFrom(await memberRow(q, m.id));
+      await audit(q, op, '会員の担当店舗を変更', memberRef(m.id), now);
+      const updated = await memberRow(q, m.id);
+      return { ref: memberRef(m.id), salonId: updated.salon_id, staffId: updated.staff_id || '' };
     }
     // 加盟店からの仕入発注・定期発注・月次請求（db/supply-store.mjs）
     const supplyResult = await supply.handle(q, route, method, input, actor, now, effects);
@@ -410,10 +426,11 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       // 前の版で作ったテーブルへの列追加（卸価格・管理者のLINE ID）
       let addedWholesale = false;
       if (await db.tableExists('products') && !(await db.tableColumns('products')).includes('wholesale_price')) { await db.exec('ALTER TABLE products ADD COLUMN wholesale_price INT NOT NULL DEFAULT 0'); addedWholesale = true; }
+      if (await db.tableExists('members') && (await db.tableColumns('members')).includes('email') && !(await db.tableColumns('members')).includes('privacy_version')) { await db.exec(`ALTER TABLE members ADD COLUMN privacy_version ${db.dialect === 'mysql' ? 'VARCHAR(20)' : 'TEXT'} NULL`); await db.exec(`ALTER TABLE members ADD COLUMN privacy_agreed_at ${db.dialect === 'mysql' ? 'VARCHAR(30)' : 'TEXT'} NULL`); }
       if (await db.tableExists('operators') && !(await db.tableColumns('operators')).includes('line_id')) await db.exec(db.dialect === 'mysql' ? 'ALTER TABLE operators ADD COLUMN line_id VARCHAR(100) NULL, ADD UNIQUE KEY operators_line_id (line_id)' : 'ALTER TABLE operators ADD COLUMN line_id TEXT');
       await db.migrate();
       if (addedWholesale) for (const p of await db.all('SELECT id, price FROM products')) await db.run('UPDATE products SET wholesale_price=? WHERE id=?', [wholesaleOf(num(p.price)), p.id]);
-      await db.run("UPDATE app_meta SET meta_value='2' WHERE meta_key='schema_version'");
+      await db.run("UPDATE app_meta SET meta_value='3' WHERE meta_key='schema_version'");
       if (await db.get('SELECT id FROM salons LIMIT 1')) return { imported: false };
       if (db.dialect === 'sqlite' && await db.tableExists('legacy_platform_state')) {
         const row = await db.get('SELECT payload FROM legacy_platform_state WHERE id=1');
@@ -427,7 +444,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
         const counts = await importState(tx, state, { catalog, concernNames, legacyMembers, legacySessions, now });
         // デモ用の管理アカウント（本番では管理画面から個別のパスワードで作成する）
         for (const op of demoOperators) await tx.run('INSERT INTO operators (id, email, name, role, salon_id, dealer_id, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [op.id, op.email, op.name, op.role, op.salonId || null, op.dealerId || null, operatorPassword.salt, operatorPassword.hash, now]);
-        await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '2')");
+        await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '3')");
         return counts;
       });
       return { imported: Boolean(legacyState), ...result };

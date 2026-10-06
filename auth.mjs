@@ -2,12 +2,13 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { passwordDigest, validateMember, validatePassword, SESSION_AGE } from './dist/member-store.js';
 import { clientIp, createLimiter } from './rate-limit.mjs';
+import { privacyConsent, PRIVACY_VERSION } from './dist/privacy.js';
 
 function failWith(message, status, code) { const error = new Error(message); error.status = status; if (code) error.code = code; throw error; }
 const DUMMY_SALT = '00000000000000000000000000000000';
 const MEMBER_SELECT = 'SELECT m.*, s.name AS salon_name FROM members m LEFT JOIN salons s ON s.id=m.salon_id';
 // 画面に返す会員情報（パスワードのハッシュは含めない）
-const memberFrom = row => row && ({ id: row.id, salon: row.salon_name || '', name: row.name, email: row.email, kana: row.kana, phone: row.phone, gender: row.gender, birthday: row.birthday, createdAt: row.created_at, ...(row.line_id ? { lineId: row.line_id } : {}) });
+const memberFrom = row => row && ({ id: row.id, salon: row.salon_name || '', name: row.name, email: row.email, kana: row.kana, phone: row.phone, gender: row.gender, birthday: row.birthday, createdAt: row.created_at, privacyVersion: row.privacy_version || '', privacyAgreedAt: row.privacy_agreed_at || '', ...(row.line_id ? { lineId: row.line_id } : {}) });
 
 export function createAuth(db, options = {}) {
   const secure = options.secure ? '; Secure' : '';
@@ -33,8 +34,9 @@ export function createAuth(db, options = {}) {
     const digest = await passwordDigest(randomBytes(24).toString('hex'));
     const id = crypto.randomUUID(), now = new Date().toISOString();
     try {
-      await db.run('INSERT INTO members (id, email, password_salt, password_hash, name, kana, phone, gender, birthday, line_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, fields.email, digest.salt, digest.hash, fields.name, fields.kana, fields.phone, fields.gender, fields.birthday, lineId, now, now]);
+      // LINEでの登録は、画面の「同意して登録」の操作をもって同意として記録する
+      await db.run('INSERT INTO members (id, email, password_salt, password_hash, name, kana, phone, gender, birthday, line_id, privacy_version, privacy_agreed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, fields.email, digest.salt, digest.hash, fields.name, fields.kana, fields.phone, fields.gender, fields.birthday, lineId, PRIVACY_VERSION, now, now, now]);
     } catch (error) {
       // 同じLINEユーザーの初回ログインが同時に届いた場合は、先に作られた会員を使う。
       if (!db.isUniqueViolation(error)) throw error;
@@ -71,12 +73,13 @@ export function createAuth(db, options = {}) {
       if (route === '/api/auth/register' && method === 'POST') {
         const fields = validateMember(input);
         validatePassword(input.password);
+        const consent = privacyConsent(input);
         if (await db.get('SELECT id FROM members WHERE email=?', [fields.email])) throw Error('このデモ用メールアドレスは登録済みです。');
         const digest = await passwordDigest(input.password);
         const id = crypto.randomUUID(), now = new Date().toISOString();
         try {
-          await db.run('INSERT INTO members (id, email, password_salt, password_hash, name, kana, phone, gender, birthday, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, fields.email, digest.salt, digest.hash, fields.name, fields.kana, fields.phone, fields.gender, fields.birthday, now, now]);
+          await db.run('INSERT INTO members (id, email, password_salt, password_hash, name, kana, phone, gender, birthday, privacy_version, privacy_agreed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, fields.email, digest.salt, digest.hash, fields.name, fields.kana, fields.phone, fields.gender, fields.birthday, consent.version, now, now, now]);
         } catch (error) { if (db.isUniqueViolation(error)) throw Error('このデモ用メールアドレスは登録済みです。'); throw error; }
         const profile = await findById(id);
         await session(req, res, profile);

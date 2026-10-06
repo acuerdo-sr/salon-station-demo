@@ -13,7 +13,7 @@ test('HTTP: operator session, role isolation, atomic oversell protection and res
  try{await start();assert.equal((await call('/platform/admin/snapshot')).status,401);
   assert.equal((await call('/platform/operator/login','POST',{email:'admin@example.test',password:'bad'})).status,401);
   const a=await call('/platform/operator/login','POST',{email:'admin@example.test',password:'Demo-Admin-2026'});assert.equal(a.status,200);const ac=a.cookie;
-  const m=await call('/auth/register','POST',{name:'デモ利用者',salon:'LUMIÈRE',email:'buyer@example.test',password:'Demo-Member-2026'}),mc=m.cookie;
+  const m=await call('/auth/register','POST',{name:'デモ利用者',salon:'LUMIÈRE',email:'buyer@example.test',password:'Demo-Member-2026',agreePrivacy:true}),mc=m.cookie;
   assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},mc)).status,200);
   const before=(await call('/platform/admin/snapshot','GET',undefined,ac)).body.orders.length;
   await call('/platform/admin/products/shampoo-moist','PATCH',{stock:1,price:2860,cost:1716,enabled:true},ac);
@@ -22,7 +22,7 @@ test('HTTP: operator session, role isolation, atomic oversell protection and res
   const results=await Promise.all([call('/platform/orders','POST',input,mc),call('/platform/orders','POST',{...order,requestKey:crypto.randomUUID()},mc)]);
   assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);const saved=results.find(r=>r.status===200).body;
   assert.equal((await call('/platform/orders','GET',undefined,mc)).body.length,1);
-  const b=await call('/auth/register','POST',{name:'別会員',salon:'LUMIÈRE',email:'other@example.test',password:'Demo-Member-2026'});
+  const b=await call('/auth/register','POST',{name:'別会員',salon:'LUMIÈRE',email:'other@example.test',password:'Demo-Member-2026',agreePrivacy:true});
   assert.equal((await call('/platform/orders','GET',undefined,b.cookie)).body.length,0);
   assert.equal((await call('/platform/admin/products/shampoo-moist','PATCH',{stock:5,price:1,cost:1,enabled:true},mc)).status,401);
   assert.equal((await call('/platform/admin/products/shampoo-moist','PATCH',{stock:5,price:1,cost:1,enabled:true},ac,'https://evil.test')).status,403);
