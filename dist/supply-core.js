@@ -1,6 +1,7 @@
 // 加盟店（サロン）からフランチャイザーへの仕入発注・定期発注・発注提案・月次請求・店販の取り分。
 // 検証・計算はブラウザ版（このファイルの supplyRequest）と DB版（db/platform-store.mjs）で共有する。
 import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js';
+import { summarizeCustomers } from './privacy.js';
 
 export const supplyStatuses = { ordered: '受付待ち', accepted: '出荷準備中', shipped: '出荷済み', delivered: 'お届け済み', cancelled: 'キャンセル' };
 export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', shipped: 'delivered' };
@@ -88,6 +89,22 @@ export function marginFor(p, feeRate) {
   return { productId: p.id, name: p.name, price: p.price, cost: p.cost, wholesalePrice: p.wholesalePrice, fee, ecTake, storeTake, difference: ecTake - storeTake };
 }
 // 請求書の参考情報：同じ月の店販ECでサロンが受け取る見込み額
+export const monthBefore = month => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; };
+// 発注画面の「店販EC」：この店舗で売れたEC注文の今月・前月の集計。お客様の名前やIDは含めない（集計値だけ）。
+// 売上は注文時の店舗で数える（会員の担当店舗を後から付け替えても、過去の売上は動かない）。キャンセル・返品済みは除く。
+// 取り分は精算と同じ「商品売上 − 仕入原価 − 運用料」の見込み。
+// orders：今月・前月の注文 { month, memberId, subtotal, purchase, fee }、items：今月の明細 { productId, name, quantity, sales }
+export function ecSummary({ month, orders, items, products, members }) {
+  const previousMonth = monthBefore(month);
+  const totals = m => { const list = orders.filter(o => o.month === m); return { sales: list.reduce((s, o) => s + o.subtotal, 0), orders: list.length, customers: new Set(list.map(o => o.memberId)).size, proceeds: list.reduce((s, o) => s + o.subtotal - o.purchase - o.fee, 0) }; };
+  const current = totals(month), previous = totals(previousMonth), byProduct = new Map();
+  for (const i of items) {
+    const row = byProduct.get(i.productId) || { productId: i.productId, name: products.find(p => p.id === i.productId)?.name || i.name, quantity: 0, sales: 0 };
+    row.quantity += i.quantity; row.sales += i.sales; byProduct.set(i.productId, row);
+  }
+  const topProducts = [...byProduct.values()].sort((a, b) => b.quantity - a.quantity || b.sales - a.sales || a.productId.localeCompare(b.productId)).slice(0, 3);
+  return { month, previousMonth, current, previous, change: previous.sales ? Math.round((current.sales - previous.sales) / previous.sales * 1000) / 10 : null, topProducts, members };
+}
 export const ecProceedsFor = (orders, salonId, month) => orders.filter(o => o.salonId === salonId && jst(o.createdAt).slice(0, 7) === month).map(settlement).reduce((s, x) => s + x.proceeds, 0);
 
 // ---- ブラウザ版（state を直接扱う）
@@ -137,9 +154,17 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
     const op = requireOperator(actor, ['salon']), salon = state.salons.find(s => s.id === op.salonId);
     const own = state.supplyOrders.filter(o => o.salonId === op.salonId);
     const history = own.filter(o => o.status !== 'cancelled').flatMap(o => o.items.map(i => ({ productId: i.id, orderedOn: o.orderedOn, quantity: i.quantity })));
+    const products = state.products.filter(p => p.enabled).map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }));
+    // 店販EC（今月・前月）。お客様の情報は渡さず、集計値だけを渡す
+    const month = jst(now).slice(0, 7), monthOf = o => jst(o.createdAt).slice(0, 7);
+    const sold = state.orders.filter(o => o.salonId === salon.id && !['cancelled', 'returned'].includes(o.status) && [month, monthBefore(month)].includes(monthOf(o)));
+    const stats = summarizeCustomers([salon], state.profiles.map(p => ({ salonId: p.salonId, lineLinked: p.lineLinked, joinedMonth: jst(p.createdAt).slice(0, 7) })), [], month)[0];
+    const ec = ecSummary({ month, products, members: { total: stats.members, newThisMonth: stats.newThisMonth, lineLinked: stats.lineLinked },
+      orders: sold.map(o => ({ month: monthOf(o), memberId: o.memberId, subtotal: o.subtotal, purchase: o.items.reduce((s, i) => s + i.cost * i.quantity, 0), fee: o.fee })),
+      items: sold.filter(o => monthOf(o) === month).flatMap(o => o.items.map(i => ({ productId: i.id, name: i.name, quantity: i.quantity, sales: i.price * i.quantity }))) });
     return {
       salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: salon.feeRate },
-      products: state.products.filter(p => p.enabled).map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock })),
+      products, ec,
       orders: own.slice(0, 50).map(supplyView), subscriptions: clone(state.supplySubscriptions.filter(s => s.salonId === op.salonId)),
       suggestions: supplySuggestions(history, state.products, today), invoices: state.invoices.filter(i => i.salonId === op.salonId).map(invoiceSummary), issuer: { ...ISSUER },
     };

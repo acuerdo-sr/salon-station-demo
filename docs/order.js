@@ -24,16 +24,36 @@ function loginView(message = '') {
 }
 function shell() {
   const t = cartTotal();
-  const tabs = [['order', '発注'], ['history', '履歴'], ['subscriptions', '定期発注'], ['invoices', '請求書']];
+  const tabs = [['order', '発注'], ['ec', '店販EC'], ['history', '履歴'], ['subscriptions', '定期発注'], ['invoices', '請求書']];
   $('#app').innerHTML = `<header class="order-header"><div><b>${esc(ws.salon.name)}</b><small>${esc(operator.name)}</small></div><button class="icon-btn" data-logout aria-label="ログアウト">${icon('logout')}</button></header>
     ${lineToken && !operator.lineLinked ? `<div class="notice order-banner">このLINEアカウントと連携すると、次回からLINEで開くだけでログインできます。<button class="btn line small" data-line-link>LINEと連携</button></div>` : ''}
     <nav class="order-tabs" aria-label="発注メニュー">${tabs.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-tab="${id}">${label}${id === 'order' && t.count ? `<b>${t.count}</b>` : ''}</button>`).join('')}</nav>
-    <main class="order-main">${tab === 'order' ? orderTab() : tab === 'history' ? historyTab() : tab === 'subscriptions' ? subscriptionsTab() : invoicesTab()}</main>
+    <main class="order-main">${tab === 'order' ? orderTab() : tab === 'ec' ? ecTab() : tab === 'history' ? historyTab() : tab === 'subscriptions' ? subscriptionsTab() : invoicesTab()}</main>
     ${tab === 'order' && t.count ? `<div class="order-cartbar"><div><small>${t.count}点${t.shipping ? ` / 送料 ${money(t.shipping)}` : ' / 送料無料'}</small><strong>${money(t.total)}</strong></div><button class="btn primary" data-review>発注内容を確認 ${icon('arrow')}</button></div>` : ''}`;
+}
+// ---- 店販EC：貴店を選んでいるお客様がECで買った分の集計（お客様の名前は受け取らない）
+const monthLabel = month => `${Number(month.slice(5))}月`;
+const changeText = e => e.change === null ? '前月の実績なし' : `前月比 ${e.change >= 0 ? '+' : '−'}${Math.abs(e.change)}%`;
+function ecGlance() {
+  const e = ws.ec;
+  return `<button class="ec-glance" data-tab="ec" aria-label="店販ECの詳細を見る"><span><small>${monthLabel(e.month)}の店販EC</small><b>${money(e.current.sales)}</b></span><span><small>取り分（見込み）</small><b>${money(e.current.proceeds)}</b></span><span class="ec-change">${changeText(e)}${icon('chevron')}</span></button>`;
+}
+function ecTab() {
+  const e = ws.ec, c = e.current, p = e.previous, prev = monthLabel(e.previousMonth);
+  return `<p class="notice">貴店を選んでいるお客様が、ECで購入した分の集計です（${monthLabel(e.month)}1日〜今日。商品代・税込で、送料は含みません）。お客様のお名前は表示しません。お客様ごとの内訳は管理画面の「受注管理」で確認できます。</p>
+    <section class="ec-metrics">
+      <article class="metric"><div class="metric-top">店販EC売上</div><div class="metric-value">${money(c.sales)}</div><div class="metric-bottom">${changeText(e)}<br>${prev} ${money(p.sales)}</div></article>
+      <article class="metric"><div class="metric-top">サロンの取り分（見込み）</div><div class="metric-value">${money(c.proceeds)}</div><div class="metric-bottom">${prev} ${money(p.proceeds)}</div></article>
+      <article class="metric"><div class="metric-top">注文</div><div class="metric-value">${c.orders}<small>件</small></div><div class="metric-bottom">購入されたお客様 ${c.customers}人<br>${prev} ${p.orders}件</div></article>
+      <article class="metric"><div class="metric-top">会員</div><div class="metric-value">${e.members.total}<small>人</small></div><div class="metric-bottom">今月の新規 ${e.members.newThisMonth}人<br>LINE連携 ${e.members.lineLinked}人</div></article>
+    </section>
+    <section class="order-section"><h2>よく売れている商品（${monthLabel(e.month)}）</h2><p class="subtle-note">店頭の在庫や、次の発注の目安にご利用ください。</p>
+    ${e.topProducts.length ? e.topProducts.map((t, i) => { const product = productOf(t.productId); return `<article class="supply-order ec-rank"><span class="rank-num">${i + 1}</span><div><b>${esc(t.name)}</b><small>${t.quantity}点・${money(t.sales)}</small></div>${product && product.stock > (cart[product.id] || 0) ? `<button class="btn soft small" data-ec-add="${esc(product.id)}">発注に追加</button>` : ''}</article>`; }).join('') : empty('今月のEC注文はまだありません', 'QRコードや紹介リンクから、お客様にECをご案内ください。')}</section>
+    <p class="subtle-note">取り分は「商品売上 − 仕入原価 − 運用料（${ws.salon.feeRate}%）」の見込みです。本部からのお支払いや、請求書との相殺の方法は別途ご案内します。キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
 }
 function orderTab() {
   const s = ws.suggestions;
-  return `${s.length ? `<section class="order-section"><h2>発注のご提案</h2><p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${s.map(x => `<article class="suggest-card"><div><b>${esc(x.name)}</b><small>いつも約${x.averageDays}日ごと・前回 ${esc(x.lastOrderedOn.slice(5).replace('-', '/'))}（${x.daysSince}日前）</small></div><button class="btn soft small" data-suggest="${esc(x.productId)}" data-qty="${x.quantity}">${x.quantity}点を追加</button></article>`).join('')}</section>` : ''}
+  return `${ecGlance()}${s.length ? `<section class="order-section"><h2>発注のご提案</h2><p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${s.map(x => `<article class="suggest-card"><div><b>${esc(x.name)}</b><small>いつも約${x.averageDays}日ごと・前回 ${esc(x.lastOrderedOn.slice(5).replace('-', '/'))}（${x.daysSince}日前）</small></div><button class="btn soft small" data-suggest="${esc(x.productId)}" data-qty="${x.quantity}">${x.quantity}点を追加</button></article>`).join('')}</section>` : ''}
     <section class="order-section"><h2>商品</h2><p class="subtle-note">卸価格（税込）です。11,000円以上で送料無料。</p>
     ${ws.products.map(p => { const q = cart[p.id] || 0; return `<article class="supply-item"><img src="./assets/${esc(p.image)}" alt=""><div class="supply-copy"><b>${esc(p.name)}</b><small>${esc(p.size)} / 在庫 ${p.stock}</small><span>${money(p.wholesalePrice)}<small> 卸価格・税込（売価 ${money(p.price)}）</small></span></div><div class="qty-control"><button data-step="${esc(p.id)}" data-delta="-1" ${q ? '' : 'disabled'} aria-label="${esc(p.name)}を1点減らす">−</button><span>${q}</span><button data-step="${esc(p.id)}" data-delta="1" ${q >= p.stock ? 'disabled' : ''} aria-label="${esc(p.name)}を1点増やす">＋</button></div></article>`; }).join('')}</section>`;
 }
@@ -82,6 +102,7 @@ document.addEventListener('click', async e => {
     if (b.hasAttribute('data-line-link')) { operator = (await platform('/operator/line', 'POST', { idToken: lineToken })).operator; shell(); toast('LINEと連携しました。次回からLINEで開くだけでログインできます。'); }
     if (b.hasAttribute('data-logout')) { await platform('/operator/logout', 'POST', {}); setCart({}); loginView(); }
     if (b.dataset.step) { const id = b.dataset.step, next = (cart[id] || 0) + Number(b.dataset.delta), p = productOf(id); const copy = { ...cart }; if (next <= 0) delete copy[id]; else copy[id] = Math.min(next, p.stock, 999); setCart(copy, cartSource); shell(); }
+    if (b.dataset.ecAdd) { const p = productOf(b.dataset.ecAdd); setCart({ ...cart, [p.id]: Math.min((cart[p.id] || 0) + 1, p.stock, 999) }, cartSource); shell(); toast(`${p.name}をカートに追加しました。「発注」で確認できます。`); }
     if (b.dataset.suggest) { const p = productOf(b.dataset.suggest); setCart({ ...cart, [p.id]: Math.min((cart[p.id] || 0) + Number(b.dataset.qty), p.stock) }, 'suggestion'); shell(); toast('提案の数量をカートに追加しました。'); }
     if (b.dataset.reorder) { const o = ws.orders.find(o => o.id === b.dataset.reorder), next = {}, skipped = []; for (const i of o.items) { const p = productOf(i.id); if (p?.stock) next[i.id] = Math.min(i.quantity, p.stock); else skipped.push(i.name); } setCart(next, 'reorder'); tab = 'order'; shell(); toast(skipped.length ? `在庫がない商品を除いて追加しました：${skipped.join('、')}` : '前回と同じ内容をカートに入れました。'); }
     if (b.hasAttribute('data-review')) review();

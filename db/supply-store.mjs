@@ -2,13 +2,14 @@
 import { fail, optional, requireOperator, jst, includedTax, requestKeyOf, validateTracking } from '../dist/platform-core.js';
 import {
   supplyStatuses, SUPPLY_TRANSITIONS, supplyIntervals, ISSUER, supplyOrderId, subscriptionId, invoiceId, invoiceDueOn, salonAddress,
-  nextRunOn, addDays, supplyLines, supplyTotals, supplySource, subscriptionInput, closableMonth, supplySuggestions,
+  nextRunOn, addDays, supplyLines, supplyTotals, supplySource, subscriptionInput, closableMonth, supplySuggestions, ecSummary, monthBefore,
 } from '../dist/supply-core.js';
 
 const num = value => Number(value || 0);
 const marks = list => list.map(() => '?').join(',');
 
-export function createSupplyStore({ db, loadProducts, audit }) {
+// customerStats：店舗ごとの会員の集計（db/platform-store.mjs）。発注画面の「店販EC」で使う。
+export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
   const supplyView = (r, items) => ({
     id: r.id, salonId: r.salon_id, salonName: r.ship_name, operatorId: r.operator_id, operatorName: r.operator_name, source: r.source, subscriptionId: r.subscription_id || null, status: r.status,
     items: items.map(i => ({ id: i.product_id, sku: i.sku, name: i.name, size: i.size, image: i.image, unitPrice: num(i.unit_price), quantity: num(i.quantity), amount: num(i.unit_price) * num(i.quantity) })),
@@ -59,9 +60,18 @@ export function createSupplyStore({ db, loadProducts, audit }) {
     const today = jst(now).slice(0, 10), salon = await q.get('SELECT * FROM salons WHERE id=?', [op.salonId]) || fail('サロンが見つかりません。', 404);
     const products = (await supplyProducts(q)).filter(p => p.enabled);
     const history = (await q.all("SELECT so.ordered_on, si.product_id, si.quantity FROM supply_order_items si JOIN supply_orders so ON so.id=si.supply_order_id WHERE so.salon_id=? AND so.status<>'cancelled' AND so.ordered_on>=?", [salon.id, addDays(today, -180)])).map(r => ({ productId: r.product_id, orderedOn: r.ordered_on, quantity: num(r.quantity) }));
+    // 店販EC（今月・前月）。お客様の情報は渡さず、集計値だけを渡す（注文日は日本時間）
+    const month = jst(now).slice(0, 7), from = `${monthBefore(month)}-01`, to = `${month}-31`, active = "o.status NOT IN ('cancelled','returned')";
+    const sold = await q.all(`SELECT o.member_id, o.subtotal, o.fee, o.ordered_on, (SELECT COALESCE(SUM(i.unit_cost*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS purchase FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active}`, [salon.id, from, to]);
+    const items = await q.all(`SELECT i.product_id, MAX(i.name) AS name, SUM(i.quantity) AS quantity, SUM(i.unit_price*i.quantity) AS sales FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active} GROUP BY i.product_id`, [salon.id, `${month}-01`, to]);
+    const [stats] = await customerStats(q, [{ id: salon.id, name: salon.name }], now);
+    const shown = products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }));
+    const ec = ecSummary({ month, products: shown, members: { total: stats.members, newThisMonth: stats.newThisMonth, lineLinked: stats.lineLinked },
+      orders: sold.map(o => ({ month: o.ordered_on.slice(0, 7), memberId: o.member_id, subtotal: num(o.subtotal), purchase: num(o.purchase), fee: num(o.fee) })),
+      items: items.map(i => ({ productId: i.product_id, name: i.name, quantity: num(i.quantity), sales: num(i.sales) })) });
     return {
       salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: num(salon.fee_rate) },
-      products: products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock })),
+      products: shown, ec,
       orders: await loadSupplyOrders(q, 'salon_id=?', [salon.id], 50), subscriptions: await loadSubscriptions(q, 'salon_id=?', [salon.id]),
       suggestions: supplySuggestions(history, products, today), invoices: await loadInvoices(q, 'salon_id=?', [salon.id]), issuer: { ...ISSUER },
     };

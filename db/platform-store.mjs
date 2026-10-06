@@ -447,7 +447,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     if (supplyResult !== undefined) return supplyResult;
     fail('この操作は利用できません。', 404);
   }
-  const supply = createSupplyStore({ db, loadProducts, audit });
+  const supply = createSupplyStore({ db, loadProducts, audit, customerStats });
 
   // ---- 個人情報の暗号化（版の更新時・鍵を設定したとき）
   // 暗号化に合わせた列の追加・拡張（schema_version 3 → 4）。SQLite は列の型の長さを問わない。
