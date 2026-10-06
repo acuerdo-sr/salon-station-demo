@@ -5,6 +5,8 @@ import path from 'node:path';
 import { products, concernCategories } from './catalog.mjs';
 import { openDatabase } from './db/adapter.mjs';
 import { loadDataKey, createFieldCrypto } from './db/crypto.mjs';
+import { createMailer } from './mailer.mjs';
+import { createImageStore, UPLOAD_PATH } from './images.mjs';
 import { createAuth } from './auth.mjs';
 import { createPlatformServer } from './platform-server.mjs';
 import { createLineAuth, lineConfigFromEnv, LINE_STATE_COOKIE } from './line.mjs';
@@ -22,7 +24,11 @@ const origin = `http://127.0.0.1:${port}`;
 // LINE連携（仕様書 2.2.7 / 2.4）。HTTPSトンネル等で外部公開する場合は PUBLIC_ORIGIN / ALLOWED_HOSTS / TRUST_PROXY を設定する。
 const lineConfig = lineConfigFromEnv(process.env, origin);
 const secure = lineConfig.publicOrigin.startsWith('https://');
-const auth = createAuth(db, { secure, fieldCrypto });
+// パスワード再設定のメール（SMTP_URL があれば送信、なければ mail_outbox に保存してこの画面に表示）
+const mailer = createMailer(db, { fieldCrypto });
+const auth = createAuth(db, { secure, fieldCrypto, mailer, publicOrigin: lineConfig.publicOrigin });
+// 管理画面から登録した商品画像（data/uploads/products）
+const images = createImageStore(path.join(dataDir, 'uploads'));
 const line = createLineAuth(auth, lineConfig);
 const extraHosts = (process.env.ALLOWED_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, new URL(lineConfig.publicOrigin).host, ...extraHosts]);
@@ -63,7 +69,7 @@ async function onChange({ effects, store }) {
   }
  }
 }
-const platformServer = await createPlatformServer(db, products, auth, { secure, concernNames: concernCategories, onChange, fieldCrypto, verifyLineToken: idToken => line.verify(idToken) });
+const platformServer = await createPlatformServer(db, products, auth, { secure, concernNames: concernCategories, onChange, fieldCrypto, images, verifyLineToken: idToken => line.verify(idToken) });
 if (dataKey.source !== 'env') console.log(`個人情報の暗号鍵：${dataKey.source}（本番では DATA_ENCRYPTION_KEY を設定し、DBとは別の場所に保管してください）`);
 if (db.dialect === 'sqlite' && await db.tableExists('legacy_members')) console.warn('旧形式の表（legacy_*）に暗号化前の個人情報が残っています。移行を確認したら削除してください（README「DBへのアクセス」）。');
 // 期日を迎えた定期発注を起動時と10分ごとに作成する
@@ -78,10 +84,11 @@ function fail(message, status=400) { const e=new Error(message); e.status=status
 function appendCookie(res, value) { const previous = res.getHeader('Set-Cookie'); res.setHeader('Set-Cookie', [...(previous ? [].concat(previous) : []), value]); }
 const readCookie = (req, name) => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(name + '='))?.slice(name.length + 1) || '';
 // 本文はバイト列のまま集めてから一度だけ UTF-8 に変換する（チャンク境界で日本語が分断されても文字化けしない）。
-async function readBody(req) {
+// 商品の登録・編集だけは画像（data URL）を含むため上限を大きくする
+async function readBody(req, limit = 32768) {
  if(!req.headers['content-type']?.startsWith('application/json')) fail('JSON形式で送信してください。',415);
  const chunks=[]; let size=0;
- for await(const chunk of req){size+=chunk.length;if(size>32768) fail('送信内容が大きすぎます。',413);chunks.push(chunk);}
+ for await(const chunk of req){size+=chunk.length;if(size>limit) fail('送信内容が大きすぎます。',413);chunks.push(chunk);}
  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{fail('送信形式が正しくありません。');}
 }
 
@@ -117,7 +124,8 @@ const server = http.createServer(async (req, res) => {
    catch (error) { return json(res, error.status || 400, { error: error.message }); }
   }
   if(url.pathname.startsWith('/api/platform/')) {
-   try {return json(res,200,await platformServer.request(url.pathname.slice('/api/platform'.length),req.method,req.method==='GET'?undefined:await readBody(req),req,res));}
+   const limit = /^\/api\/platform\/admin\/products(\/|$)/.test(url.pathname) ? 3 * 1024 * 1024 : 32768;
+   try {return json(res,200,await platformServer.request(url.pathname.slice('/api/platform'.length),req.method,req.method==='GET'?undefined:await readBody(req, limit),req,res));}
    catch(error){return json(res,error.status||400,{error:error.message});}
   }
   if (url.pathname.startsWith('/api/auth/')) {
@@ -126,13 +134,19 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/api/')) return json(res,404,{error:'この操作は利用できません。'});
   if (req.method !== 'GET' && req.method !== 'HEAD') return json(res,405,{error:'Method not allowed'});
+  // 管理画面から登録した商品画像。ファイル名は乱数（images.mjs）で、それ以外のパスは配信しない
+  if (UPLOAD_PATH.test(url.pathname)) {
+   const type = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[url.pathname.split('.').pop()];
+   try { const body = readFileSync(path.join(images.dir, path.basename(url.pathname))); res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=31536000, immutable' }); return res.end(req.method === 'HEAD' ? undefined : body); }
+   catch { return json(res, 404, { error: '画像が見つかりません。' }); }
+  }
   let relative;
   try { relative = decodeURIComponent(url.pathname === '/' || url.pathname === '/index.html' ? '/shop.html' : url.pathname); }
   catch { return json(res,400,{error:'URLの形式が正しくありません。'}); }
   const staticRoot = path.join(root,'dist');
   const file = path.resolve(staticRoot, '.' + relative);
   if (!file.startsWith(staticRoot + path.sep)) return json(res,403,{error:'Forbidden'});
-  const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.svg':'image/svg+xml'};
+  const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml'};
   try { const body=readFileSync(file); res.writeHead(200, {'Content-Type':mime[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); res.end(req.method==='HEAD'?undefined:body); }
   catch { json(res,404,{error:'ページが見つかりません。'}); }
  } catch(e) { console.error(e.message); if(!res.headersSent) json(res,e.status||500,{error:e.status?e.message:'処理に失敗しました。もう一度お試しください。'}); }

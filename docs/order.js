@@ -2,7 +2,7 @@
 import { platform, isPages } from './platform-client.js';
 import { supplyStatuses, supplySources, supplyIntervals, addDays } from './supply-core.js';
 import { DEMO_OPERATOR_PASSWORD } from './platform-core.js';
-import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError } from './ui-kit.js';
+import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl } from './ui-kit.js';
 import { lineConfig, liffIdToken } from './line-login.js';
 import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js';
 
@@ -55,7 +55,7 @@ function orderTab() {
   const s = ws.suggestions;
   return `${ecGlance()}${s.length ? `<section class="order-section"><h2>発注のご提案</h2><p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${s.map(x => `<article class="suggest-card"><div><b>${esc(x.name)}</b><small>いつも約${x.averageDays}日ごと・前回 ${esc(x.lastOrderedOn.slice(5).replace('-', '/'))}（${x.daysSince}日前）</small></div><button class="btn soft small" data-suggest="${esc(x.productId)}" data-qty="${x.quantity}">${x.quantity}点を追加</button></article>`).join('')}</section>` : ''}
     <section class="order-section"><h2>商品</h2><p class="subtle-note">卸価格（税込）です。11,000円以上で送料無料。</p>
-    ${ws.products.map(p => { const q = cart[p.id] || 0; return `<article class="supply-item"><img src="./assets/${esc(p.image)}" alt=""><div class="supply-copy"><b>${esc(p.name)}</b><small>${esc(p.size)} / 在庫 ${p.stock}</small><span>${money(p.wholesalePrice)}<small> 卸価格・税込（売価 ${money(p.price)}）</small></span></div><div class="qty-control"><button data-step="${esc(p.id)}" data-delta="-1" ${q ? '' : 'disabled'} aria-label="${esc(p.name)}を1点減らす">−</button><span>${q}</span><button data-step="${esc(p.id)}" data-delta="1" ${q >= p.stock ? 'disabled' : ''} aria-label="${esc(p.name)}を1点増やす">＋</button></div></article>`; }).join('')}</section>`;
+    ${ws.products.map(p => { const q = cart[p.id] || 0; return `<article class="supply-item"><img src="${esc(imageUrl(p.image))}" alt=""><div class="supply-copy"><b>${esc(p.name)}</b><small>${esc(p.size)} / 在庫 ${p.stock}</small><span>${money(p.wholesalePrice)}<small> 卸価格・税込（売価 ${money(p.price)}）</small></span></div><div class="qty-control"><button data-step="${esc(p.id)}" data-delta="-1" ${q ? '' : 'disabled'} aria-label="${esc(p.name)}を1点減らす">−</button><span>${q}</span><button data-step="${esc(p.id)}" data-delta="1" ${q >= p.stock ? 'disabled' : ''} aria-label="${esc(p.name)}を1点増やす">＋</button></div></article>`; }).join('')}</section>`;
 }
 function historyTab() {
   return ws.orders.length ? ws.orders.map(o => `<article class="supply-order"><div class="between"><div><b>${esc(o.id)}</b><small>${date(o.createdAt, true)}・${esc(supplySources[o.source] || '')}</small></div>${badge(o.status, supplyStatuses[o.status])}</div>

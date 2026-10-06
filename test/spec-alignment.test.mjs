@@ -26,18 +26,21 @@ test('closed site: guests get no products or quotes, members and operators do',(
 test('member profile carries the spec member fields and validation',()=>{
   const s=fixture();const p=platformRequest(s,'/profile','GET',undefined,{member});
   assert.equal(p.kana,'デモ ハナコ');assert.equal(p.phone,'090-0000-0000');assert.equal(p.gender,'2');assert.equal(p.birthday,'1990-01-01');
+  // フリガナは必須（仕様書 2.6.2）。LINEでの簡略登録だけはフリガナなしで作り、注文の前に登録してもらう
   const base={salon:'デモ',name:'デモ 花子',email:'x@example.test'};
-  assert.deepEqual(validateMember(base),{...base,kana:'',phone:'',birthday:'',gender:''});
-  assert.throws(()=>validateMember({...base,phone:'０９０'}),/電話番号/);
+  assert.throws(()=>validateMember(base),/フリガナを入力/);
+  assert.deepEqual(validateMember(base,{kanaRequired:false}),{...base,kana:'',phone:'',birthday:'',gender:''});
+  assert.deepEqual(validateMember({...base,kana:'デモ ハナコ'}),{...base,kana:'デモ ハナコ',phone:'',birthday:'',gender:''});
+  assert.throws(()=>validateMember({...base,kana:'デモ',phone:'０９０'}),/電話番号/);
   assert.throws(()=>validateMember({...base,kana:'hanako'}),/フリガナ/);
-  assert.throws(()=>validateMember({...base,birthday:'1990-13-45'}),/生年月日/);
-  assert.throws(()=>validateMember({...base,gender:'3'}),/性別/);
+  assert.throws(()=>validateMember({...base,kana:'デモ',birthday:'1990-13-45'}),/生年月日/);
+  assert.throws(()=>validateMember({...base,kana:'デモ',gender:'3'}),/性別/);
   assert.equal(validateMember({...base,kana:'デモ ハナコ',gender:9}).gender,'9');
 });
 
 test('sales report aggregates by period and salon, excludes cancelled orders, scopes salon role',()=>{
   const s=fixture();
-  const other={id:'buyer-b',name:'別会員',email:'b@example.test'};platformRequest(s,'/profile','PATCH',{salonId:'atelier',staffId:''},{member:other},now);
+  const other={id:'buyer-b',name:'別会員',kana:'ベツ カイイン',email:'b@example.test'};platformRequest(s,'/profile','PATCH',{salonId:'atelier',staffId:''},{member:other},now);
   order(s,'lumiere',[{id:'shampoo-moist',quantity:2,price:2860}],'2026-09-14T15:30:00.000Z'); // 9/15 00:30 JST
   order(s,'lumiere',[{id:'oil-smooth',quantity:1,price:2640}],'2026-09-01T02:00:00.000Z');
   const c=order(s,'lumiere',[{id:'oil-smooth',quantity:1,price:2640}],'2026-09-02T02:00:00.000Z');platformRequest(s,'/orders/'+c.id+'/cancel','POST',{},{member},now);

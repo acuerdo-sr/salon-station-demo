@@ -1,7 +1,7 @@
 // /api/platform/* の受け口。管理者のログイン・セッション（operators / operator_sessions）を扱い、
 // 業務処理は db/platform-store.mjs に任せる。
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { passwordDigest, SESSION_AGE } from './dist/member-store.js';
+import { passwordDigest, SESSION_IDLE, SESSION_COOKIE_AGE } from './dist/member-store.js';
 import { createPlatformStore } from './db/platform-store.mjs';
 import { clientIp, createLimiter } from './rate-limit.mjs';
 
@@ -10,17 +10,22 @@ const operatorFrom = row => row && ({ id: row.id, role: row.role, ...(row.salon_
 function failWith(message, status) { const e = new Error(message); e.status = status; throw e; }
 
 export async function createPlatformServer(db, catalog, auth, options = {}) {
-  const store = createPlatformStore(db, { catalog, concernNames: options.concernNames, fieldCrypto: options.fieldCrypto });
+  const store = createPlatformStore(db, { catalog, concernNames: options.concernNames, fieldCrypto: options.fieldCrypto, images: options.images });
   const initialized = await store.init();
   if (initialized.imported) console.log(`旧形式のデータを移行しました（店舗${initialized.salons}・会員${initialized.members}・注文${initialized.orders}）。`);
   const limiter = createLimiter(), secure = options.secure ? '; Secure' : '', trustProxy = options.trustProxy ?? process.env.TRUST_PROXY === '1';
   const tokenHash = value => createHash('sha256').update(value).digest('hex');
   const token = req => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('salon_operator='))?.slice(15) || '';
   const cookie = (res, value, age) => res.setHeader('Set-Cookie', `salon_operator=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${secure}`);
+  // 管理者のセッションも最後の操作から30分で切れる（仕様書 3.1.2）。使うたびに期限を延ばす（書き込みは1分に1回まで）
+  const clock = options.now || Date.now;
   async function operator(req) {
     const value = token(req);
     if (!/^[a-f0-9]{64}$/.test(value)) return null;
-    return operatorFrom(await db.get('SELECT o.* FROM operator_sessions s JOIN operators o ON o.id=s.operator_id WHERE s.token_hash=? AND s.expires_at>?', [tokenHash(value), Date.now()]));
+    const now = clock(), hash = tokenHash(value);
+    const row = await db.get('SELECT o.*, s.expires_at AS session_expires_at FROM operator_sessions s JOIN operators o ON o.id=s.operator_id WHERE s.token_hash=? AND s.expires_at>?', [hash, now]);
+    if (row && Number(row.session_expires_at) - now < SESSION_IDLE - 60000) await db.run('UPDATE operator_sessions SET expires_at=? WHERE token_hash=?', [now + SESSION_IDLE, hash]);
+    return operatorFrom(row);
   }
   return {
     store, operator,
@@ -36,10 +41,10 @@ export async function createPlatformServer(db, catalog, auth, options = {}) {
         const expected = Buffer.from(row?.password_hash || '', 'hex'), actual = Buffer.from(digest.hash, 'hex');
         if (!row || expected.length !== actual.length || !timingSafeEqual(expected, actual)) { limiter.fail(key); const e = Error('メールアドレスまたはパスワードが違います。'); e.status = 401; throw e; }
         limiter.reset(key);
-        await db.run('DELETE FROM operator_sessions WHERE token_hash=? OR expires_at<=?', [tokenHash(token(req)), Date.now()]);
+        await db.run('DELETE FROM operator_sessions WHERE token_hash=? OR expires_at<=?', [tokenHash(token(req)), clock()]);
         const value = randomBytes(32).toString('hex');
-        await db.run('INSERT INTO operator_sessions (token_hash, operator_id, expires_at) VALUES (?, ?, ?)', [tokenHash(value), row.id, Date.now() + SESSION_AGE]);
-        cookie(res, value, SESSION_AGE / 1000);
+        await db.run('INSERT INTO operator_sessions (token_hash, operator_id, expires_at) VALUES (?, ?, ?)', [tokenHash(value), row.id, clock() + SESSION_IDLE]);
+        cookie(res, value, SESSION_COOKIE_AGE / 1000);
         return { operator: operatorFrom(row) };
       }
       // 加盟店スタッフの LINE ログイン（発注画面を LINE から開く）。ログイン中に呼ぶとその管理アカウントに連携する。
@@ -56,10 +61,10 @@ export async function createPlatformServer(db, catalog, auth, options = {}) {
           return { operator: operatorFrom(await db.get('SELECT * FROM operators WHERE id=?', [current.id])), linked: true };
         }
         if (!owner) failWith('このLINEアカウントはまだ連携されていません。メールアドレスでログインしてから「LINEと連携」を押してください。', 404);
-        await db.run('DELETE FROM operator_sessions WHERE token_hash=? OR expires_at<=?', [tokenHash(token(req)), Date.now()]);
+        await db.run('DELETE FROM operator_sessions WHERE token_hash=? OR expires_at<=?', [tokenHash(token(req)), clock()]);
         const value = randomBytes(32).toString('hex');
-        await db.run('INSERT INTO operator_sessions (token_hash, operator_id, expires_at) VALUES (?, ?, ?)', [tokenHash(value), owner.id, Date.now() + SESSION_AGE]);
-        cookie(res, value, SESSION_AGE / 1000);
+        await db.run('INSERT INTO operator_sessions (token_hash, operator_id, expires_at) VALUES (?, ?, ?)', [tokenHash(value), owner.id, clock() + SESSION_IDLE]);
+        cookie(res, value, SESSION_COOKIE_AGE / 1000);
         return { operator: operatorFrom(owner) };
       }
       // ip はアクセス記録（個人情報を含む画面を開いた記録）に残す接続元

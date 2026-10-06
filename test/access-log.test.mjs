@@ -139,7 +139,7 @@ test('sqlite: customer fields are stored encrypted, while e-mail login, duplicat
     for (const k of ['email', 'name', 'kana', 'phone']) assert.ok(isEncrypted(row[k]), k);
     assert.match(row.email_index, /^[0-9a-f]{64}$/);
     // メールアドレスは大文字・小文字を区別せず検索・重複確認できる
-    await assert.rejects(ctx.auth.request('/api/auth/register', 'POST', { salon: 'x', name: 'x', email: 'KOJIN-TARO@example.test', password: 'Demo-Member-2026', agreePrivacy: true }, fakeReq(), fakeRes()), /登録済み/);
+    await assert.rejects(ctx.auth.request('/api/auth/register', 'POST', { salon: 'x', name: 'x', kana: 'エックス', email: 'KOJIN-TARO@example.test', password: 'Demo-Member-2026', agreePrivacy: true }, fakeReq(), fakeRes()), /登録済み/);
     const login = await ctx.auth.request('/api/auth/login', 'POST', { email: 'kojin-taro@example.test', password: 'Demo-Member-2026' }, fakeReq(), fakeRes());
     assert.equal(login.member.name, secret.name); assert.equal(login.member.phone, '090-1234-5678');
     // 画面には復号した値を渡す（担当サロン）
@@ -192,27 +192,28 @@ test('sqlite: a database encrypted with one key refuses to start with another ke
 test('sqlite: upgrading a version-3 database encrypts existing customer data and leaves no plaintext in the file', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-seal-')), file = path.join(dir, 'shop.sqlite');
   const fileText = async () => (await Promise.all([file, file + '-wal'].filter(existsSync).map(f => readFile(f)))).map(b => b.toString('utf8')).join('');
+  let db;
   try {
     // 前の版（schema_version 3）：暗号化なし・email_index とアクセス記録の表がない
-    let db = await createSqliteAdapter(file);
+    db = await createSqliteAdapter(file);
     const plain = createFieldCrypto(null), store = createPlatformStore(db, { catalog: products, concernNames: concernCategories });
     await store.init({ now });
     const taro = await registerCustomer({ store, auth: createAuth(db, { fieldCrypto: plain }) });
     await db.exec("DROP INDEX members_email_index; ALTER TABLE members DROP COLUMN email_index; DROP TABLE data_access_logs; UPDATE app_meta SET meta_value='3' WHERE meta_key='schema_version'");
-    await db.close();
+    await db.close(); db = null;
     assert.ok(plaintextIn(await fileText()).length > 0, '前の版のファイルには平文がある');
     // 鍵を設定して起動すると、列を追加し、既存の行を暗号化し、ファイルを詰め直す
     db = await createSqliteAdapter(file);
     const ctx = await encryptedStore(db);
     assert.ok((await db.tableColumns('members')).includes('email_index'));
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '4');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '5');
     assert.ok((await db.all('SELECT email, name FROM members')).every(m => isEncrypted(m.email) && isEncrypted(m.name)));
     const login = await ctx.auth.request('/api/auth/login', 'POST', { email: 'kojin-taro@example.test', password: 'Demo-Member-2026' }, fakeReq(), fakeRes());
     assert.equal(login.member.id, taro.id); assert.equal(login.member.name, secret.name);
     assert.equal((await ctx.store.request('/orders', 'GET', undefined, { member: login.member }, now))[0].customer.address, secret.address);
-    await db.close();
+    await db.close(); db = null;
     assert.deepEqual(plaintextIn(await fileText()), [], 'DBファイルに暗号化前の値が残らない');
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally { await db?.close().catch(() => {}); await rm(dir, { recursive: true, force: true }); }
 });
 
 test('maintenance commands: db:migrate brings the database up to date; customer:lookup prints one member and records it', async () => {
@@ -224,7 +225,7 @@ test('maintenance commands: db:migrate brings the database up to date; customer:
     const missing = script('customer-lookup', ['--ref', 'M-00000000', '--by', '保守 担当', '--purpose', 'お問い合わせ対応']);
     assert.equal(missing.status, 1); assert.match(missing.stderr, /見つかりません/); assert.equal(existsSync(path.join(dir, 'encryption.key')), false);
     const migrated = script('db-migrate');
-    assert.equal(migrated.status, 0, migrated.stderr); assert.match(migrated.stdout, /最新の版（4）/);
+    assert.equal(migrated.status, 0, migrated.stderr); assert.match(migrated.stdout, /最新の版（5）/);
     const db = await createSqliteAdapter(path.join(dir, 'shop.sqlite'));
     const ctx = await encryptedStore(db, loadDataKey({ dataDir: dir }).key), taro = await registerCustomer(ctx);
     await db.close();

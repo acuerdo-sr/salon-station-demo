@@ -20,7 +20,7 @@ test('member numbers are stable, pseudonymous and the policy is versioned', () =
 test('browser member store: registration requires consent and records the policy version', async () => {
   const mem = () => { const d = new Map(); return { getItem: k => d.get(k) ?? null, setItem: (k, v) => d.set(k, v), removeItem: k => d.delete(k) }; };
   const members = createMemberStore(mem(), mem(), 'm');
-  const input = { salon: 'x', name: 'x', email: 'c@example.test', password: 'Demo-Member-2026' };
+  const input = { salon: 'x', name: 'x', kana: 'エックス', email: 'c@example.test', password: 'Demo-Member-2026' };
   await assert.rejects(members.request('/auth/register', 'POST', input), /同意/);
   await assert.rejects(members.request('/auth/register', 'POST', { ...input, agreePrivacy: 'yes' }), /同意/);
   const created = (await members.request('/auth/register', 'POST', { ...input, agreePrivacy: true })).member;

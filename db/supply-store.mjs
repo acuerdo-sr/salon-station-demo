@@ -109,6 +109,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
       }
       return result;
     },
+    loadOrders: (q, where, params, limit) => loadSupplyOrders(q, where, params, limit),
     operatorsWithLine: salonId => db.all('SELECT id, line_id FROM operators WHERE salon_id=? AND line_id IS NOT NULL', [salonId]),
     async snapshot(q, op) {
       if (op.role === 'dealer') return { supplyOrders: [], subscriptions: [], invoices: [] };

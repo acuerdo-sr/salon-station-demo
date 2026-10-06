@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "mysql2": "^3.24.5",
+    "nodemailer": "^10.0.15",
     "qrcode-generator": "2.0.4"
   }
 }

@@ -8,6 +8,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const schemaStatements = dialect => readFileSync(path.join(here, `schema.${dialect}.sql`), 'utf8')
   .split('\n').filter(line => !line.trim().startsWith('--')).join('\n')
   .split(';').map(sql => sql.trim()).filter(Boolean);
+// 表の定義（CREATE TABLE 文）を1つだけ取り出す（表の作り直しに使う）
+export const schemaTable = (dialect, table) => schemaStatements(dialect).find(sql => sql.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`)) || (() => { throw Error(`schema: ${table} がありません`); })();
 
 // SQLite（node:sqlite）。接続は1本なので、トランザクションと単発の問い合わせを直列化する。
 export async function createSqliteAdapter(file) {

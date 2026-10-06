@@ -31,8 +31,8 @@ export function loadDataKey({ env = process.env, dataDir, create = true } = {}) 
 // 暗号化して保存する列。メールアドレスの検索には members.email_index（鍵付きハッシュ）を使う。
 export const SEALED_COLUMNS = {
   members: ['email', 'name', 'kana', 'phone', 'gender', 'birthday'],
-  member_addresses: ['name', 'postal', 'address'],
-  orders: ['ship_name', 'ship_postal', 'ship_address', 'ship_email', 'return_reason'],
+  member_addresses: ['name', 'postal', 'address', 'phone'],
+  orders: ['ship_name', 'ship_postal', 'ship_address', 'ship_phone', 'ship_email', 'return_reason'],
 };
 // 空の値は個人情報ではないので、暗号化済みとみなす
 export const isSealed = value => value == null || value === '' || isEncrypted(value);

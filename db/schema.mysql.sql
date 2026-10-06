@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS members (
   id VARCHAR(40) PRIMARY KEY, email VARCHAR(512) NOT NULL, email_index VARCHAR(64) NULL, password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL,
   name VARCHAR(512) NOT NULL, kana VARCHAR(512) NOT NULL DEFAULT '', phone VARCHAR(128) NOT NULL DEFAULT '', gender VARCHAR(128) NOT NULL DEFAULT '', birthday VARCHAR(128) NOT NULL DEFAULT '',
   line_id VARCHAR(100) NULL UNIQUE, salon_id VARCHAR(20) NULL, staff_id VARCHAR(40) NULL, salon_linked_at VARCHAR(30) NULL,
-  privacy_version VARCHAR(20) NULL, privacy_agreed_at VARCHAR(30) NULL,
+  privacy_version VARCHAR(20) NULL, privacy_agreed_at VARCHAR(30) NULL, default_payment_method VARCHAR(20) NOT NULL DEFAULT '',
   created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   UNIQUE KEY members_email_index (email_index), KEY members_salon (salon_id), FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (staff_id) REFERENCES staff(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -55,8 +55,25 @@ CREATE TABLE IF NOT EXISTS member_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS member_addresses (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, member_id VARCHAR(40) NOT NULL,
-  name VARCHAR(512) NOT NULL, postal VARCHAR(128) NOT NULL, address VARCHAR(1500) NOT NULL, is_default TINYINT(1) NOT NULL DEFAULT 1, updated_at VARCHAR(30) NOT NULL,
+  name VARCHAR(512) NOT NULL, postal VARCHAR(128) NOT NULL, address VARCHAR(1500) NOT NULL, phone VARCHAR(256) NOT NULL DEFAULT '', is_default TINYINT(1) NOT NULL DEFAULT 1, updated_at VARCHAR(30) NOT NULL,
   KEY member_addresses_member (member_id, is_default), FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+-- 会員のクレジットカード（決済代行のトークンは暗号化。カード番号は持たない）
+CREATE TABLE IF NOT EXISTS member_cards (
+  id VARCHAR(40) PRIMARY KEY, member_id VARCHAR(40) NOT NULL, provider VARCHAR(40) NOT NULL,
+  token VARCHAR(512) NOT NULL, brand VARCHAR(20) NOT NULL, last4 CHAR(4) NOT NULL, exp_month INT NOT NULL, exp_year INT NOT NULL,
+  is_default TINYINT(1) NOT NULL DEFAULT 0, created_at VARCHAR(30) NOT NULL,
+  KEY member_cards_member (member_id), FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+-- パスワード再設定（トークンはハッシュだけ。30分・1回限り）
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash CHAR(64) PRIMARY KEY, member_id VARCHAR(40) NOT NULL, expires_at BIGINT NOT NULL, used_at VARCHAR(30) NULL, created_at VARCHAR(30) NOT NULL,
+  KEY password_resets_member (member_id), FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+-- 送信したメールの記録（宛先と本文は暗号化）
+CREATE TABLE IF NOT EXISTS mail_outbox (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, to_address VARCHAR(600) NOT NULL, subject VARCHAR(200) NOT NULL, body TEXT NOT NULL,
+  transport VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL, error VARCHAR(300) NOT NULL DEFAULT '', created_at VARCHAR(30) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS operators (
@@ -86,8 +103,9 @@ CREATE TABLE IF NOT EXISTS orders (
   member_id VARCHAR(40) NOT NULL, salon_id VARCHAR(20) NOT NULL,
   salon_name VARCHAR(100) NOT NULL, seller VARCHAR(100) NOT NULL, staff_id VARCHAR(40) NOT NULL DEFAULT '', staff_name VARCHAR(40) NOT NULL,
   fee_rate INT NOT NULL, fee INT NOT NULL, subtotal INT NOT NULL, shipping INT NOT NULL, total INT NOT NULL, tax_total INT NOT NULL,
+  payment_method VARCHAR(20) NOT NULL DEFAULT 'card', payment_fee INT NOT NULL DEFAULT 0,
   status VARCHAR(20) NOT NULL, payment_status VARCHAR(20) NOT NULL,
-  ship_name VARCHAR(512) NOT NULL, ship_postal VARCHAR(128) NOT NULL, ship_address VARCHAR(1500) NOT NULL, ship_email VARCHAR(512) NOT NULL,
+  ship_name VARCHAR(512) NOT NULL, ship_postal VARCHAR(128) NOT NULL, ship_address VARCHAR(1500) NOT NULL, ship_phone VARCHAR(256) NOT NULL DEFAULT '', ship_email VARCHAR(512) NOT NULL,
   return_reason VARCHAR(1700) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, is_sample TINYINT(1) NOT NULL DEFAULT 0,
   ordered_on CHAR(10) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY orders_salon_date (salon_id, ordered_on), KEY orders_member (member_id, created_at), KEY orders_created (created_at),
@@ -117,7 +135,9 @@ CREATE TABLE IF NOT EXISTS order_events (
 
 CREATE TABLE IF NOT EXISTS payments (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, order_id VARCHAR(40) NOT NULL, provider VARCHAR(40) NOT NULL, provider_payment_id VARCHAR(100) NOT NULL,
-  amount INT NOT NULL, status VARCHAR(20) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
+  amount INT NOT NULL, status VARCHAR(20) NOT NULL,
+  method VARCHAR(20) NOT NULL DEFAULT 'card', reference VARCHAR(60) NOT NULL DEFAULT '', due_on VARCHAR(10) NOT NULL DEFAULT '',
+  created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY payments_order (order_id), FOREIGN KEY (order_id) REFERENCES orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS refunds (

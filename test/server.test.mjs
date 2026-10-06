@@ -38,7 +38,7 @@ function splitBodyRequest(route, json, cookie) {
 test('server: closed store, member sessions, origin checks, UTF-8 bodies, login throttling and persistence', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-server-test-'));
   let child;
-  const details = email => ({ salon: 'テスト会員サロン', name: '会員担当', email, password: 'Demo-Member-2026', agreePrivacy: true });
+  const details = email => ({ salon: 'テスト会員サロン', name: '会員担当', kana: 'カイイン タントウ', email, password: 'Demo-Member-2026', agreePrivacy: true });
   const order = (items = [{ id: 'shampoo-moist', price: 2860, quantity: 1 }]) => ({ salonId: 'lumiere', items, customer: { name: 'デモ 花子', postal: '0000000', address: '架空県 1-2-3' }, requestKey: randomUUID() });
   try {
     child = await start(dir);
@@ -129,6 +129,21 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
       const logs = (await call('/platform/admin/snapshot', 'GET', undefined, adminLogin.cookie.split(';')[0])).body.accessLogs;
       assert.equal(logs[0].actorId, 'salon-a'); assert.equal(logs[0].ip, '127.0.0.1');
     });
+    await t.test('product images are saved as files and served only from the upload folder; reset mail goes to the local outbox', async () => {
+      const adminLogin = await call('/platform/operator/login', 'POST', { email: 'admin@example.test', password: 'Demo-Admin-2026' }), adminCookie = adminLogin.cookie.split(';')[0];
+      const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      const created = await call('/platform/admin/products', 'POST', { sku: 'SRV-IMG-01', brand: 'SENA', name: '画像つき商品', categoryId: 'shampoo', concerns: [], size: '', description: '', tag: '', price: 1000, cost: 500, wholesalePrice: 650, dealerId: 'sena', stock: 1, enabled: true, imageData: png }, adminCookie);
+      assert.equal(created.status, 200, JSON.stringify(created.body)); assert.match(created.body.image, /^uploads\/products\/[0-9a-f-]{36}\.png$/);
+      const image = await fetch(base + '/' + created.body.image);
+      assert.equal(image.status, 200); assert.equal(image.headers.get('content-type'), 'image/png');
+      assert.ok(existsSync(path.join(dir, created.body.image)));
+      assert.equal((await fetch(base + '/uploads/products/../../shop.sqlite')).status, 404);
+      assert.equal((await fetch(base + '/uploads/products/not-a-file.png')).status, 404);
+      assert.deepEqual((await call('/auth/password/forgot', 'POST', { email: 'a@example.test' })).body, { sent: true });
+      const raw = new DatabaseSync(path.join(dir, 'shop.sqlite'), { readOnly: true });
+      try { const mail = raw.prepare('SELECT subject, to_address, transport FROM mail_outbox').all(); assert.equal(mail.length, 1); assert.equal(mail[0].transport, 'outbox'); assert.match(mail[0].to_address, /^enc:v1:/); }
+      finally { raw.close(); }
+    });
   } finally { await stop(child); assert.ok(path.resolve(dir).startsWith(path.resolve(os.tmpdir()) + path.sep + 'salon-server-test-')); await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -136,7 +151,7 @@ test('server: behind a trusted proxy the client address comes from X-Forwarded-F
   const dir = await mkdtemp(path.join(os.tmpdir(), 'salon-server-proxy-'));
   const child = await start(dir, { TRUST_PROXY: '1', PUBLIC_ORIGIN: 'https://shop.example.test', DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') });
   try {
-    const register = await call('/auth/register', 'POST', { salon: 'x', name: 'x', email: 'p@example.test', password: 'Demo-Member-2026', agreePrivacy: true });
+    const register = await call('/auth/register', 'POST', { salon: 'x', name: 'x', kana: 'エックス', email: 'p@example.test', password: 'Demo-Member-2026', agreePrivacy: true });
     assert.match(register.cookie, /Secure/);
     const from = ip => ({ 'X-Forwarded-For': ip });
     for (let i = 0; i < 10; i++) await call('/auth/login', 'POST', { email: 'p@example.test', password: 'bad-password-' + i }, '', from('203.0.113.1'));

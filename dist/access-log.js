@@ -13,6 +13,7 @@ export const accessTargets = {
   ordersCsv: '受注一覧（お客様名）',
   membersCsv: '会員一覧（全項目）',
   member: '会員情報（暗号化を解除して参照）',
+  shippingCsv: '出荷指示（お名前・住所・電話番号）',
 };
 const exportTargets = { orders: 'ordersCsv', members: 'membersCsv' };
 

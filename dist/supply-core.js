@@ -8,7 +8,7 @@ export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', sh
 export const supplySources = { manual: '通常', reorder: '再注文', suggestion: '発注提案', subscription: '定期発注' };
 export const supplyIntervals = { weekly: '毎週', biweekly: '2週間ごと', monthly: '毎月' };
 // 請求書の発行者（架空）。本番ではフランチャイザーの名称・適格請求書発行事業者の登録番号・振込先に置き換える。
-export const ISSUER = { name: 'SALON STATION 本部（架空）', registrationNumber: 'T0000000000000', address: '山口県萩市椿東0-0-0（架空）', bank: 'デモ銀行 本店 普通 0000000（架空）' };
+export const ISSUER = { name: 'SALON STATION 本部（架空）', registrationNumber: 'T0000000000000', address: '山口県萩市椿東0-0-0（架空）', phone: '0838-00-0000', bank: 'デモ銀行 本店 普通 0000000（架空）' };
 export const wholesaleOf = price => Math.round(price * 0.65);
 export const supplyOrderId = now => 'WO-' + now.slice(2, 10).replaceAll('-', '') + '-' + crypto.randomUUID().slice(0, 5).toUpperCase();
 export const subscriptionId = () => 'SUB-' + crypto.randomUUID().slice(0, 8).toUpperCase();

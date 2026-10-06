@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMemberStore, SESSION_AGE } from '../dist/member-store.js';
+import { createMemberStore, SESSION_IDLE } from '../dist/member-store.js';
 const memory = () => { const data = new Map(); return { getItem: k => data.get(k) ?? null, setItem: (k, v) => data.set(k, v), removeItem: k => data.delete(k) }; };
-const profile = email => ({ salon: 'テストサロン', name: 'テスト担当', email, password: 'Demo-Member-2026', agreePrivacy: true });
+const profile = email => ({ salon: 'テストサロン', name: 'テスト担当', kana: 'テスト タントウ', email, password: 'Demo-Member-2026', agreePrivacy: true });
 
 test('Pages membership registration, login, editing, expiry and password handling', async () => {
   const data = memory(), session = memory(); let now = Date.now();
@@ -19,9 +19,12 @@ test('Pages membership registration, login, editing, expiry and password handlin
   await assert.rejects(members.request('/auth/login', 'POST', { email: a.email, password: 'Wrong-Password' }), /違います/);
   assert.equal(members.current(), null);
   await members.request('/auth/login', 'POST', profile(a.email));
-  const edited = await members.request('/auth/profile', 'PATCH', { salon: '変更後サロン', name: '変更後担当', email: 'b@example.test', id: 'forged' });
+  const edited = await members.request('/auth/profile', 'PATCH', { salon: '変更後サロン', name: '変更後担当', kana: 'ヘンコウゴ', email: 'b@example.test', id: 'forged' });
   assert.equal(edited.member.id, a.id); assert.equal(edited.member.email, a.email); assert.equal(edited.member.salon, '変更後サロン');
-  now += SESSION_AGE + 1; assert.equal(members.current(), null);
+  // 最後の操作から30分で切れる。操作があれば延びる
+  now += SESSION_IDLE - 1000; assert.equal(members.current().id, a.id);
+  now += SESSION_IDLE - 1000; assert.equal(members.current().id, a.id);
+  now += SESSION_IDLE + 1; assert.equal(members.current(), null);
 });
 
 test('Pages storage failure does not leave a signed-in phantom member', async () => {
