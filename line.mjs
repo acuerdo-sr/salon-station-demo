@@ -9,6 +9,8 @@ export function lineConfigFromEnv(env = process.env, origin) {
     enabled: Boolean(channelId && channelSecret),
     channelId, channelSecret,
     liffId: env.LIFF_ID || '',
+    // 加盟店の発注画面（order.html）用の LIFF アプリ。同じ LINE ログインチャネルに追加する。
+    orderLiffId: env.LIFF_ID_ORDER || '',
     messagingToken: env.LINE_MESSAGING_TOKEN || '',
     scope: env.LINE_SCOPE || 'profile openid',
     publicOrigin,
@@ -67,7 +69,9 @@ export function createLineAuth(auth, config, options = {}) {
     return url.href;
   }
   return {
-    config: { enabled: config.enabled, liffId: config.liffId, notifications: Boolean(config.messagingToken) },
+    config: { enabled: config.enabled, liffId: config.liffId, orderLiffId: config.orderLiffId, notifications: Boolean(config.messagingToken) },
+    // IDトークンの検証だけを行う（加盟店スタッフの LINE ログインに使う）
+    async verify(idToken) { if (!config.enabled) fail('LINEログインは未設定です。', 404); if (typeof idToken !== 'string' || !idToken) fail('LINEのIDトークンがありません。'); return verifyIdToken(idToken); },
     // LINEログイン開始：state と nonce を発行し、LINEの認可画面へ送る。QRの店舗・スタッフは state 側に保持する。
     // state は開始したブラウザの Cookie にも保存し、コールバックで照合する（ログインCSRF・連携の乗っ取り対策）。
     start(query, currentMember) {

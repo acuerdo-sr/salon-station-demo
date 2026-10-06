@@ -6,7 +6,8 @@ import { createPlatformStore } from './db/platform-store.mjs';
 import { clientIp, createLimiter } from './rate-limit.mjs';
 
 const DUMMY_SALT = '00000000000000000000000000000000';
-const operatorFrom = row => row && ({ id: row.id, role: row.role, ...(row.salon_id ? { salonId: row.salon_id } : {}), ...(row.dealer_id ? { dealerId: row.dealer_id } : {}), name: row.name, email: row.email });
+const operatorFrom = row => row && ({ id: row.id, role: row.role, ...(row.salon_id ? { salonId: row.salon_id } : {}), ...(row.dealer_id ? { dealerId: row.dealer_id } : {}), name: row.name, email: row.email, lineLinked: Boolean(row.line_id) });
+function failWith(message, status) { const e = new Error(message); e.status = status; throw e; }
 
 export async function createPlatformServer(db, catalog, auth, options = {}) {
   const store = createPlatformStore(db, { catalog, concernNames: options.concernNames });
@@ -40,6 +41,26 @@ export async function createPlatformServer(db, catalog, auth, options = {}) {
         await db.run('INSERT INTO operator_sessions (token_hash, operator_id, expires_at) VALUES (?, ?, ?)', [tokenHash(value), row.id, Date.now() + SESSION_AGE]);
         cookie(res, value, SESSION_AGE / 1000);
         return { operator: operatorFrom(row) };
+      }
+      // 加盟店スタッフの LINE ログイン（発注画面を LINE から開く）。ログイン中に呼ぶとその管理アカウントに連携する。
+      if (route === '/operator/line' && method === 'POST') {
+        if (!options.verifyLineToken) failWith('LINEログインは未設定です。', 404);
+        const payload = await options.verifyLineToken(input?.idToken), current = await operator(req);
+        const owner = await db.get('SELECT * FROM operators WHERE line_id=?', [payload.sub]);
+        if (current) {
+          if (owner && owner.id !== current.id) failWith('このLINEアカウントは別の管理アカウントに連携済みです。', 409);
+          if (!owner) {
+            try { await db.run('UPDATE operators SET line_id=? WHERE id=?', [payload.sub, current.id]); }
+            catch (error) { if (db.isUniqueViolation(error)) failWith('このLINEアカウントは別の管理アカウントに連携済みです。', 409); throw error; }
+          }
+          return { operator: operatorFrom(await db.get('SELECT * FROM operators WHERE id=?', [current.id])), linked: true };
+        }
+        if (!owner) failWith('このLINEアカウントはまだ連携されていません。メールアドレスでログインしてから「LINEと連携」を押してください。', 404);
+        await db.run('DELETE FROM operator_sessions WHERE token_hash=? OR expires_at<=?', [tokenHash(token(req)), Date.now()]);
+        const value = randomBytes(32).toString('hex');
+        await db.run('INSERT INTO operator_sessions (token_hash, operator_id, expires_at) VALUES (?, ?, ?)', [tokenHash(value), owner.id, Date.now() + SESSION_AGE]);
+        cookie(res, value, SESSION_AGE / 1000);
+        return { operator: operatorFrom(owner) };
       }
       const actor = { operator: await operator(req), member: await auth.member(req) }, effects = [];
       const result = await store.request(route, method, input, actor, new Date().toISOString(), effects);

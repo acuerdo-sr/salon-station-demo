@@ -8,6 +8,8 @@ import {
 } from '../dist/platform-core.js';
 import { passwordDigest } from '../dist/member-store.js';
 import { importState } from './import-state.mjs';
+import { createSupplyStore } from './supply-store.mjs';
+import { wholesaleOf } from '../dist/supply-core.js';
 
 const bool = value => Boolean(Number(value));
 const num = value => Number(value || 0);
@@ -41,7 +43,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     const rows = await q.all(`SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON c.id=p.category_id${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY p.sort_order, p.id`, params);
     if (!rows.length) return [];
     const concerns = await q.all(`SELECT pc.product_id, n.name FROM product_concerns pc JOIN concerns n ON n.id=pc.concern_id WHERE pc.product_id IN (${marks(rows)}) ORDER BY n.sort_order`, rows.map(r => r.id));
-    return rows.map(r => ({ id: r.id, brand: r.brand, name: r.name, category: r.category_name, concerns: concerns.filter(c => c.product_id === r.id).map(c => c.name), size: r.size, price: num(r.price), stock: num(r.stock), image: r.image, tag: r.tag, description: r.description, sku: r.sku, enabled: bool(r.enabled), dealerId: r.dealer_id, ...(withCost ? { cost: num(r.cost) } : {}) }));
+    return rows.map(r => ({ id: r.id, brand: r.brand, name: r.name, category: r.category_name, concerns: concerns.filter(c => c.product_id === r.id).map(c => c.name), size: r.size, price: num(r.price), stock: num(r.stock), image: r.image, tag: r.tag, description: r.description, sku: r.sku, enabled: bool(r.enabled), dealerId: r.dealer_id, ...(withCost ? { cost: num(r.cost), wholesalePrice: num(r.wholesale_price) } : {}) }));
   }
   const loadDealers = async (q, dealerId) => (await q.all(`SELECT * FROM dealers${dealerId ? ' WHERE id=?' : ''} ORDER BY id DESC`, dealerId ? [dealerId] : [])).map(d => ({ id: d.id, name: d.name, short: d.short_name, area: d.area, lead: d.lead_time }));
   const profileFrom = m => ({ id: m.id, name: m.name, email: m.email, kana: m.kana, phone: m.phone, gender: m.gender, birthday: m.birthday, lineLinked: Boolean(m.line_id), salonId: m.salon_id, staffId: m.staff_id || '', createdAt: m.salon_linked_at || m.created_at });
@@ -183,6 +185,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       profiles: members.map(profileFrom),
       settlements: views.map(o => settlement(o)),
       events: op.role === 'admin' ? (await q.all('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 400')).map(e => ({ id: String(e.id), at: e.occurred_at, actor: e.actor, action: e.action, reference: e.reference })) : [],
+      ...(await supply.snapshot(q, op)),
     };
   }
   async function salesReport(q, input, actor, now) {
@@ -335,10 +338,10 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       const op = requireOperator(actor, ['admin', 'dealer']);
       const [p] = await loadProducts(q, { ids: [productAction[1]], withCost: true }); if (!p) fail('商品が見つかりません。', 404);
       if (op.role === 'dealer' && p.dealerId !== op.dealerId) fail('他社の商品は操作できません。', 403);
-      const update = { stock: int(input?.stock, 0, 99999), price: p.price, cost: p.cost, enabled: p.enabled };
-      if (op.role === 'admin') { update.price = int(input.price, 1, 1000000); update.cost = int(input.cost, 0, 1000000); if (update.cost > update.price) fail('このデモでは仕入単価を売価以下に設定してください。'); if (typeof input.enabled !== 'boolean') fail('公開設定を確認してください。'); update.enabled = input.enabled; }
-      else if (['price', 'cost', 'enabled'].some(k => input[k] !== undefined)) fail('ディーラーは在庫数のみ更新できます。', 403);
-      await q.run('UPDATE products SET stock=?, price=?, cost=?, enabled=?, updated_at=? WHERE id=?', [update.stock, update.price, update.cost, update.enabled ? 1 : 0, now, p.id]);
+      const update = { stock: int(input?.stock, 0, 99999), price: p.price, cost: p.cost, wholesalePrice: p.wholesalePrice, enabled: p.enabled };
+      if (op.role === 'admin') { update.price = int(input.price, 1, 1000000); update.cost = int(input.cost, 0, 1000000); update.wholesalePrice = int(input.wholesalePrice ?? p.wholesalePrice, 0, 1000000); if (update.cost > update.price) fail('このデモでは仕入単価を売価以下に設定してください。'); if (update.wholesalePrice > update.price) fail('卸価格は売価以下にしてください。'); if (typeof input.enabled !== 'boolean') fail('公開設定を確認してください。'); update.enabled = input.enabled; }
+      else if (['price', 'cost', 'enabled', 'wholesalePrice'].some(k => input[k] !== undefined)) fail('ディーラーは在庫数のみ更新できます。', 403);
+      await q.run('UPDATE products SET stock=?, price=?, cost=?, wholesale_price=?, enabled=?, updated_at=? WHERE id=?', [update.stock, update.price, update.cost, update.wholesalePrice, update.enabled ? 1 : 0, now, p.id]);
       if (update.stock !== p.stock) await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'adjust', '', ?, ?)", [p.id, update.stock - p.stock, op.name, now]);
       await audit(q, op, '商品・在庫を更新', p.sku, now);
       return (await loadProducts(q, { ids: [p.id], withCost: true }))[0];
@@ -385,8 +388,12 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
       await audit(q, op, '会員の担当店舗を変更', m.id, now);
       return profileFrom(await memberRow(q, m.id));
     }
+    // 加盟店からの仕入発注・定期発注・月次請求（db/supply-store.mjs）
+    const supplyResult = await supply.handle(q, route, method, input, actor, now, effects);
+    if (supplyResult !== undefined) return supplyResult;
     fail('この操作は利用できません。', 404);
   }
+  const supply = createSupplyStore({ db, loadProducts, audit });
 
   return {
     // テーブル作成・旧データの移行・初期データ投入
@@ -400,7 +407,13 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
         await rename('orders', 'legacy_orders', cols => cols.includes('payload'));
         await rename('platform_state', 'legacy_platform_state', () => true);
       }
+      // 前の版で作ったテーブルへの列追加（卸価格・管理者のLINE ID）
+      let addedWholesale = false;
+      if (await db.tableExists('products') && !(await db.tableColumns('products')).includes('wholesale_price')) { await db.exec('ALTER TABLE products ADD COLUMN wholesale_price INT NOT NULL DEFAULT 0'); addedWholesale = true; }
+      if (await db.tableExists('operators') && !(await db.tableColumns('operators')).includes('line_id')) await db.exec(db.dialect === 'mysql' ? 'ALTER TABLE operators ADD COLUMN line_id VARCHAR(100) NULL, ADD UNIQUE KEY operators_line_id (line_id)' : 'ALTER TABLE operators ADD COLUMN line_id TEXT');
       await db.migrate();
+      if (addedWholesale) for (const p of await db.all('SELECT id, price FROM products')) await db.run('UPDATE products SET wholesale_price=? WHERE id=?', [wholesaleOf(num(p.price)), p.id]);
+      await db.run("UPDATE app_meta SET meta_value='2' WHERE meta_key='schema_version'");
       if (await db.get('SELECT id FROM salons LIMIT 1')) return { imported: false };
       if (db.dialect === 'sqlite' && await db.tableExists('legacy_platform_state')) {
         const row = await db.get('SELECT payload FROM legacy_platform_state WHERE id=1');
@@ -414,7 +427,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
         const counts = await importState(tx, state, { catalog, concernNames, legacyMembers, legacySessions, now });
         // デモ用の管理アカウント（本番では管理画面から個別のパスワードで作成する）
         for (const op of demoOperators) await tx.run('INSERT INTO operators (id, email, name, role, salon_id, dealer_id, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [op.id, op.email, op.name, op.role, op.salonId || null, op.dealerId || null, operatorPassword.salt, operatorPassword.hash, now]);
-        await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '1')");
+        await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '2')");
         return counts;
       });
       return { imported: Boolean(legacyState), ...result };
@@ -422,6 +435,7 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
     // 変更を伴う処理は1つのトランザクションで行い、確定した場合だけ effects（通知の種類）を返す
     async request(route, method, input, actor = {}, now = new Date().toISOString(), effects = []) {
       if (method === 'GET' || READ_ONLY.has(route)) return handle(db, route, method, input, actor, now, []);
+      if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin']); return this.runDueSubscriptions(now, effects); }
       const run = async () => {
         const local = [];
         const result = await db.transaction(async tx => { const r = await handle(tx, route, method, input, actor, now, local); if (!QUIET.has(route)) await tx.run("UPDATE counters SET value=value+1 WHERE name='revision'"); return r; });
@@ -434,6 +448,18 @@ export function createPlatformStore(db, { catalog, concernNames = [] }) {
         if (route === '/orders' && method === 'POST' && db.isUniqueViolation(error)) return run();
         throw error;
       }
+    },
+    // 期日を迎えた定期発注の作成（サーバーが一定間隔で呼ぶ）。作成した発注は effects に積む。
+    async runDueSubscriptions(now = new Date().toISOString(), effects = []) {
+      const local = [], result = await supply.runDue(now, local);
+      if (local.length || result.failed.length) await db.run("UPDATE counters SET value=value+1 WHERE name='revision'");
+      effects.push(...local);
+      return result;
+    },
+    operatorsWithLine: salonId => supply.operatorsWithLine(salonId),
+    async supplyForNotice(id) {
+      const o = await db.get('SELECT id, salon_id, total, carrier, tracking, source FROM supply_orders WHERE id=?', [id]);
+      return o && { id: o.id, salonId: o.salon_id, total: num(o.total), carrier: o.carrier, tracking: o.tracking, source: o.source };
     },
     async orderForNotice(orderId, purchaseOrderId) {
       const order = await db.get('SELECT id, member_id, total FROM orders WHERE id=?', [orderId]);

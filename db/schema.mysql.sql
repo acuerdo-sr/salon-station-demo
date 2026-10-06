@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS products (
   id VARCHAR(40) PRIMARY KEY, sku VARCHAR(40) NOT NULL UNIQUE, brand VARCHAR(100) NOT NULL, name VARCHAR(100) NOT NULL,
   category_id VARCHAR(40) NOT NULL, size VARCHAR(40) NOT NULL DEFAULT '', description TEXT NOT NULL,
   image VARCHAR(255) NOT NULL DEFAULT '', tag VARCHAR(40) NOT NULL DEFAULT '',
-  price INT NOT NULL, cost INT NOT NULL, tax_rate INT NOT NULL DEFAULT 10, dealer_id VARCHAR(40) NOT NULL,
+  price INT NOT NULL, cost INT NOT NULL, wholesale_price INT NOT NULL DEFAULT 0, tax_rate INT NOT NULL DEFAULT 10, dealer_id VARCHAR(40) NOT NULL,
   stock INT NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0, updated_at VARCHAR(30) NOT NULL,
   KEY products_dealer (dealer_id),
   CONSTRAINT products_price CHECK (price BETWEEN 1 AND 1000000), CONSTRAINT products_cost CHECK (cost >= 0), CONSTRAINT products_stock CHECK (stock >= 0),
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS member_addresses (
 CREATE TABLE IF NOT EXISTS operators (
   id VARCHAR(40) PRIMARY KEY, email VARCHAR(150) NOT NULL UNIQUE, name VARCHAR(80) NOT NULL,
   role VARCHAR(10) NOT NULL, salon_id VARCHAR(20) NULL, dealer_id VARCHAR(40) NULL,
-  password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL, created_at VARCHAR(30) NOT NULL,
+  password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL, line_id VARCHAR(100) NULL UNIQUE, created_at VARCHAR(30) NOT NULL,
   CONSTRAINT operators_role CHECK (role IN ('admin','salon','dealer')),
   FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (dealer_id) REFERENCES dealers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -137,4 +137,46 @@ CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, member_id VARCHAR(40) NOT NULL, channel VARCHAR(20) NOT NULL, kind VARCHAR(40) NOT NULL, reference VARCHAR(60) NOT NULL,
   status VARCHAR(20) NOT NULL, error VARCHAR(300) NOT NULL DEFAULT '', created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   UNIQUE KEY notifications_once (channel, kind, reference)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS supply_orders (
+  id VARCHAR(40) PRIMARY KEY, request_key VARCHAR(80) NOT NULL UNIQUE, salon_id VARCHAR(20) NOT NULL,
+  operator_id VARCHAR(40) NOT NULL, operator_name VARCHAR(80) NOT NULL, source VARCHAR(20) NOT NULL, subscription_id VARCHAR(40) NULL,
+  status VARCHAR(20) NOT NULL, subtotal INT NOT NULL, shipping INT NOT NULL, total INT NOT NULL, tax_total INT NOT NULL,
+  ship_name VARCHAR(100) NOT NULL, ship_address VARCHAR(300) NOT NULL, note VARCHAR(200) NOT NULL DEFAULT '',
+  carrier VARCHAR(40) NOT NULL DEFAULT '', tracking VARCHAR(60) NOT NULL DEFAULT '', shipped_at VARCHAR(30) NULL, delivered_at VARCHAR(30) NULL,
+  billing_month CHAR(7) NOT NULL, invoice_id VARCHAR(40) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0,
+  ordered_on CHAR(10) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
+  KEY supply_orders_salon (salon_id, created_at), KEY supply_orders_billing (billing_month, salon_id),
+  CONSTRAINT supply_orders_source CHECK (source IN ('manual','reorder','suggestion','subscription')),
+  CONSTRAINT supply_orders_status CHECK (status IN ('ordered','accepted','shipped','delivered','cancelled')),
+  FOREIGN KEY (salon_id) REFERENCES salons(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+CREATE TABLE IF NOT EXISTS supply_order_items (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, supply_order_id VARCHAR(40) NOT NULL, line_no INT NOT NULL,
+  product_id VARCHAR(40) NOT NULL, sku VARCHAR(40) NOT NULL, name VARCHAR(100) NOT NULL, size VARCHAR(40) NOT NULL DEFAULT '', image VARCHAR(255) NOT NULL DEFAULT '',
+  unit_price INT NOT NULL, quantity INT NOT NULL, tax_rate INT NOT NULL DEFAULT 10,
+  KEY supply_order_items_order (supply_order_id, line_no), CONSTRAINT supply_order_items_quantity CHECK (quantity BETWEEN 1 AND 999),
+  FOREIGN KEY (supply_order_id) REFERENCES supply_orders(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+CREATE TABLE IF NOT EXISTS supply_subscriptions (
+  id VARCHAR(40) PRIMARY KEY, salon_id VARCHAR(20) NOT NULL, operator_id VARCHAR(40) NOT NULL, interval_code VARCHAR(10) NOT NULL,
+  next_run_on CHAR(10) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, last_run_on VARCHAR(10) NOT NULL DEFAULT '', last_result VARCHAR(300) NOT NULL DEFAULT '',
+  created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
+  KEY supply_subscriptions_due (active, next_run_on), CONSTRAINT supply_subscriptions_interval CHECK (interval_code IN ('weekly','biweekly','monthly')),
+  FOREIGN KEY (salon_id) REFERENCES salons(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+CREATE TABLE IF NOT EXISTS supply_subscription_items (
+  subscription_id VARCHAR(40) NOT NULL, product_id VARCHAR(40) NOT NULL, quantity INT NOT NULL, line_no INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (subscription_id, product_id), CONSTRAINT supply_subscription_items_quantity CHECK (quantity BETWEEN 1 AND 999),
+  FOREIGN KEY (subscription_id) REFERENCES supply_subscriptions(id) ON DELETE CASCADE, FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+CREATE TABLE IF NOT EXISTS invoices (
+  id VARCHAR(40) PRIMARY KEY, salon_id VARCHAR(20) NOT NULL, billing_month CHAR(7) NOT NULL,
+  bill_to_name VARCHAR(100) NOT NULL, bill_to_address VARCHAR(300) NOT NULL, salon_name VARCHAR(100) NOT NULL,
+  issued_on CHAR(10) NOT NULL, due_on CHAR(10) NOT NULL, order_count INT NOT NULL,
+  subtotal INT NOT NULL, tax_total INT NOT NULL, total INT NOT NULL, status VARCHAR(10) NOT NULL, paid_at VARCHAR(30) NULL,
+  created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
+  UNIQUE KEY invoices_salon_month (salon_id, billing_month), CONSTRAINT invoices_status CHECK (status IN ('issued','paid')),
+  FOREIGN KEY (salon_id) REFERENCES salons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

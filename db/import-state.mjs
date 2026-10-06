@@ -2,6 +2,7 @@
 // どちらも「ブラウザ版と同じ形の state」をテーブルへ展開する。
 import { randomBytes } from 'node:crypto';
 import { jst, includedTax } from '../dist/platform-core.js';
+import { wholesaleOf, salonAddress } from '../dist/supply-core.js';
 
 // カテゴリ・お悩みの ID（表示名は日本語、ID は英字で固定）
 const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil' };
@@ -35,9 +36,9 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   // 商品
   const skuOf = id => products.find(p => p.id === id)?.sku || catalog.find(p => p.id === id)?.sku || id;
   for (const [i, p] of products.entries()) {
-    await tx.run(`INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, tax_rate, dealer_id, stock, enabled, sort_order, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)`,
-    [p.id, skuOf(p.id), p.brand || '', p.name, categoryId(p.category), p.size || '', p.description || '', p.image || '', p.tag || '', p.price, p.cost ?? 0, p.dealerId, p.stock, p.enabled === false ? 0 : 1, i, now]);
+    await tx.run(`INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)`,
+    [p.id, skuOf(p.id), p.brand || '', p.name, categoryId(p.category), p.size || '', p.description || '', p.image || '', p.tag || '', p.price, p.cost ?? 0, p.wholesalePrice ?? wholesaleOf(p.price), p.dealerId, p.stock, p.enabled === false ? 0 : 1, i, now]);
     for (const c of p.concerns || []) await tx.run('INSERT INTO product_concerns (product_id, concern_id) VALUES (?, ?)', [p.id, concernId(c)]);
     await tx.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'initial', '', 'system', ?)", [p.id, p.stock, now]);
   }
@@ -98,6 +99,28 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   // カート・お気に入り（ブラウザ版の state に含まれる場合）
   for (const [memberId, items] of Object.entries(state.carts || {})) if (members.has(memberId)) for (const [productId, quantity] of Object.entries(items)) await tx.run('INSERT INTO cart_items (member_id, product_id, quantity, updated_at) VALUES (?, ?, ?, ?)', [memberId, productId, quantity, now]);
   for (const [memberId, ids] of Object.entries(state.favorites || {})) if (members.has(memberId)) for (const productId of ids) await tx.run('INSERT INTO favorites (member_id, product_id, created_at) VALUES (?, ?, ?)', [memberId, productId, now]);
+  // 加盟店の仕入発注・定期発注・請求書
+  const salonsById = new Map((state.salons || []).map(s => [s.id, s]));
+  for (const o of [...(state.supplyOrders || [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    if (!salonIds.has(o.salonId)) continue;
+    await tx.run(`INSERT INTO supply_orders (id, request_key, salon_id, operator_id, operator_name, source, subscription_id, status, subtotal, shipping, total, tax_total,
+      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [o.id, o.requestKey || `legacy-${o.id}`, o.salonId, o.operatorId || '', o.operatorName || '', o.source || 'manual', o.subscriptionId || null, o.status, o.subtotal, o.shipping, o.total, o.taxTotal ?? includedTax(o.total),
+      o.shipTo?.name || o.salonName, o.shipTo?.address || salonAddress(salonsById.get(o.salonId)), o.note || '', o.carrier || '', o.tracking || '', o.shippedAt || null, o.deliveredAt || null,
+      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
+    for (const [i, l] of (o.items || []).entries()) await tx.run('INSERT INTO supply_order_items (supply_order_id, line_no, product_id, sku, name, size, image, unit_price, quantity, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10)', [o.id, i + 1, l.id, l.sku || skuOf(l.id), l.name, l.size || '', l.image || '', l.unitPrice, l.quantity]);
+  }
+  for (const sub of state.supplySubscriptions || []) {
+    if (!salonIds.has(sub.salonId)) continue;
+    await tx.run('INSERT INTO supply_subscriptions (id, salon_id, operator_id, interval_code, next_run_on, active, last_run_on, last_result, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sub.id, sub.salonId, sub.operatorId, sub.interval, sub.nextRunOn, sub.active ? 1 : 0, sub.lastRunOn || '', sub.lastResult || '', sub.createdAt || now, now]);
+    for (const [i, item] of (sub.items || []).entries()) await tx.run('INSERT INTO supply_subscription_items (subscription_id, product_id, quantity, line_no) VALUES (?, ?, ?, ?)', [sub.id, item.id, item.quantity, i]);
+  }
+  for (const inv of state.invoices || []) {
+    if (!salonIds.has(inv.salonId)) continue;
+    await tx.run(`INSERT INTO invoices (id, salon_id, billing_month, bill_to_name, bill_to_address, salon_name, issued_on, due_on, order_count, subtotal, tax_total, total, status, paid_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [inv.id, inv.salonId, inv.month, inv.billTo?.name || '', inv.billTo?.address || '', inv.salonName, inv.issuedOn, inv.dueOn, inv.orderCount, inv.subtotal, inv.taxTotal, inv.total, inv.status, inv.paidAt || null, inv.createdAt || now, now]);
+  }
   // 採番・更新番号
   const seq = Math.max(state.salonSeq ?? 0, (state.salons || []).length, ...(state.salons || []).map(s => Number(/^S(\d+)$/.exec(s.id)?.[1] || 0)));
   await tx.run('INSERT INTO counters (name, value) VALUES (?, ?)', ['salon_seq', seq]);

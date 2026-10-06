@@ -37,7 +37,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
   let child;
   try{
     child=await startServer(port,dir,env);
-    assert.deepEqual((await call('/auth/line/config')).body,{enabled:true,liffId:'liff-1',notifications:true});
+    assert.deepEqual((await call('/auth/line/config')).body,{enabled:true,liffId:'liff-1',orderLiffId:'',notifications:true});
     // 認可URL：state / nonce / コールバックURL / スコープ
     const first=await begin('','?salon=lumiere&staff=haruka');
     assert.equal(first.location.origin,mockBase);assert.equal(first.location.pathname,'/oauth2/v2.1/authorize');
@@ -121,7 +121,7 @@ test('LINE login stays closed when the channel is not configured',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'salon-line-off-')),port=14824,base=`http://127.0.0.1:${port}`;
   const child=await startServer(port,dir,{LINE_CHANNEL_ID:'',LINE_CHANNEL_SECRET:'',LIFF_ID:'',LINE_MESSAGING_TOKEN:'',PUBLIC_ORIGIN:''});
   try{
-    assert.deepEqual(await (await fetch(base+'/api/auth/line/config')).json(),{enabled:false,liffId:'',notifications:false});
+    assert.deepEqual(await (await fetch(base+'/api/auth/line/config')).json(),{enabled:false,liffId:'',orderLiffId:'',notifications:false});
     assert.equal((await fetch(base+'/api/auth/line/start',{redirect:'manual'})).status,404);
     const liff=await fetch(base+'/api/auth/line/liff',{method:'POST',headers:{Origin:base,'Content-Type':'application/json'},body:'{"idToken":"x"}'});
     assert.equal(liff.status,404);

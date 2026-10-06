@@ -91,3 +91,41 @@ test('a fresh database is seeded with the same sample workspace as the browser d
     assert.deepEqual(snap.settlements.map(s => s.proceeds).sort(), browser.orders.map(o => ({ ...o })).map(o => o.subtotal - o.items.reduce((s, p) => s + p.cost * p.quantity, 0) - o.fee).sort());
   } finally { await db.close(); }
 });
+
+test('a database created by the previous version gains wholesale prices, operator LINE IDs and the supply tables on startup', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { importState } = await import('../db/import-state.mjs');
+  // 前の版のテーブル定義を再現する（卸価格・管理者のLINE ID・仕入発注の表がない）
+  const current = readFileSync(new URL('../db/schema.sqlite.sql', import.meta.url), 'utf8');
+  const previous = current.slice(0, current.indexOf('-- 加盟店（サロン）からフランチャイザーへの仕入発注'))
+    .replace(' wholesale_price INTEGER NOT NULL DEFAULT 0,', '').replace(' line_id TEXT,', '').replace('CREATE UNIQUE INDEX IF NOT EXISTS operators_line_id ON operators(line_id);\n', '');
+  assert.ok(!previous.includes('wholesale_price') && !previous.includes('line_id TEXT,') && !previous.includes('supply_orders'));
+  const db = await createSqliteAdapter(':memory:');
+  try {
+    await db.exec(previous);
+    const state = createPlatform(products, now);
+    state.supplyOrders = []; state.supplySubscriptions = []; state.invoices = [];
+    await db.transaction(async tx => {
+      // 前の版の import と同じく、卸価格の列を使わずに商品を入れる
+      const without = { ...state, products: [] };
+      await importState(tx, without, { catalog: products, concernNames: concernCategories, now });
+      const categoryIds = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil' };
+      for (const [name, id] of Object.entries(categoryIds)) await tx.run('INSERT INTO categories (id, name, sort_order) VALUES (?, ?, 0)', [id, name]);
+      for (const [i, p] of state.products.entries()) await tx.run('INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, 1, ?, ?)', [p.id, p.sku, p.brand, p.name, categoryIds[p.category], p.size, p.description, p.image, p.tag, p.price, p.cost, p.dealerId, p.stock, i, now]);
+      for (const op of demoOperators) await tx.run('INSERT INTO operators (id, email, name, role, salon_id, dealer_id, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [op.id, op.email, op.name, op.role, op.salonId || null, op.dealerId || null, '00', '00', now]);
+      await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '1')");
+    });
+    const store = createPlatformStore(db, { catalog: products, concernNames: concernCategories });
+    assert.equal((await store.init({ now })).imported, false);
+    assert.ok((await db.tableColumns('products')).includes('wholesale_price'));
+    assert.ok((await db.tableColumns('operators')).includes('line_id'));
+    for (const table of ['supply_orders', 'supply_order_items', 'supply_subscriptions', 'supply_subscription_items', 'invoices']) assert.equal(await db.tableExists(table), true, table);
+    assert.equal(Number((await db.get("SELECT wholesale_price FROM products WHERE id='shampoo-moist'")).wholesale_price), 1859);
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '2');
+    const salonOp = { operator: demoOperators[1] }, ws = await store.request('/supply', 'GET', undefined, salonOp, now);
+    assert.deepEqual(ws.orders, []);
+    const o = await store.request('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity: 1, price: 1859 }] }, salonOp, now);
+    assert.equal(o.total, 1859 + 660);
+    await assert.rejects(db.run("UPDATE operators SET line_id='U-x' WHERE id='admin'").then(() => db.run("UPDATE operators SET line_id='U-x' WHERE id='salon-a'")), /UNIQUE/);
+  } finally { await db.close(); }
+});

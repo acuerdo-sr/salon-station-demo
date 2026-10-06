@@ -1,5 +1,6 @@
 import { api, isPages } from './api-client.js';
 import { createPlatform, platformRequest, migrate, demoOperators, DEMO_OPERATOR_PASSWORD } from './platform-core.js';
+import { runSubscriptions } from './supply-core.js';
 export { api, isPages };
 const base=new URL('.',import.meta.url).pathname,key=`salon-platform-v1:${base}`,opKey=key+':operator';
 let catalogPromise;
@@ -11,6 +12,8 @@ export async function platform(route,method='GET',input){
     operator=operator?demoOperators.find(o=>o.id===operator.id):null;
     if(route==='/operator/me')return {operator};
     if(route==='/operator/logout'){sessionStorage.removeItem(opKey);return {operator:null};}
+    // 公開デモ専用：LINEから開いた発注画面の体験。LINEとは通信せず、LUMIÈRE の店舗担当としてログインする。
+    if(route==='/operator/line-demo'){const selected=demoOperators.find(o=>o.role==='salon');sessionStorage.setItem(opKey,JSON.stringify({id:selected.id,expiresAt:Date.now()+86400000}));return {operator:{...selected,lineLinked:true}};}
     if(route==='/operator/login'){
       const selected=demoOperators.find(o=>o.email===String(input.email).trim().toLowerCase());if(!selected||input.password!==DEMO_OPERATOR_PASSWORD)throw Error('メールアドレスまたはパスワードが違います。');
       sessionStorage.setItem(opKey,JSON.stringify({id:selected.id,expiresAt:Date.now()+86400000}));return {operator:selected};
@@ -18,6 +21,8 @@ export async function platform(route,method='GET',input){
     catalogPromise??=fetch(new URL('./catalog.json',import.meta.url)).then(r=>{if(!r.ok)throw Error('商品データを取得できません。');return r.json();});
     let state,raw=localStorage.getItem(key);if(raw){try{state=JSON.parse(raw);}catch{throw Error('保存データを読み込めません。');}if(migrate(state,await catalogPromise))raw=null;}else state=createPlatform(await catalogPromise);
     const {member}=await api('/auth/me');
+    // 期日を迎えた定期発注を作成する（サーバー版では一定間隔で自動実行）
+    const due=runSubscriptions(state,new Date().toISOString());if(due.created.length||due.failed.length){state.revision++;raw=null;}
     const result=platformRequest(state,route,method,input,{operator,member});
     // 変更を伴う処理は保存する。カート・お気に入りは他の画面の再読み込みを促さない（更新番号を上げない）。
     const readOnly=method==='GET'||['/quote','/admin/sales'].includes(route),quiet=['/cart','/favorites'].includes(route);

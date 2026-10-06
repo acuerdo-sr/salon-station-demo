@@ -23,30 +23,50 @@ const line = createLineAuth(auth, lineConfig);
 const extraHosts = (process.env.ALLOWED_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, new URL(lineConfig.publicOrigin).host, ...extraHosts]);
 const allowedOrigins = new Set([origin, `http://localhost:${port}`, lineConfig.publicOrigin, ...extraHosts.flatMap(h => [`https://${h}`, `http://${h}`])]);
-const csp = `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'${lineConfig.liffId ? ' https://static.line-scdn.net' : ''}; connect-src 'self'${lineConfig.liffId ? ' https://static.line-scdn.net https://liffsdk.line-scdn.net https://api.line.me https://liff.line.me' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`;
+const usesLiff = Boolean(lineConfig.liffId || lineConfig.orderLiffId);
+const csp = `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'${usesLiff ? ' https://static.line-scdn.net' : ''}; connect-src 'self'${usesLiff ? ' https://static.line-scdn.net https://liffsdk.line-scdn.net https://api.line.me https://liff.line.me' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`;
 // LINE通知（Messaging API トークン設定時のみ）：新規注文と出荷を LINE連携済みの会員へ送る。
 // 業務ロジックが「実際に起きた変化」だけを effects として返し、さらに notifications テーブルで1件につき1回に限定する。
-const platformServer = await createPlatformServer(db, products, auth, { secure, concernNames: concernCategories, onChange: async ({ effects, store }) => {
+const notifyLine = async (recipient, lineId, kind, reference, text, store) => {
+ if (!(await store.claimNotification(recipient, 'line', kind, reference))) return;
+ line.notify(lineId, text)
+  .then(() => store.finishNotification('line', kind, reference, 'sent'))
+  .catch(error => { console.error('LINE notify:', error.message); return store.finishNotification('line', kind, reference, 'failed', error.message); })
+  .catch(error => console.error('LINE notify record:', error.message));
+};
+// 業務ロジックが「実際に起きた変化」だけを effects として返し、さらに notifications テーブルで1件につき1回に限定する。
+async function onChange({ effects, store }) {
  if (!line.config.notifications) return;
  for (const effect of effects) {
-  const kind = effect.type, reference = effect.type === 'shipped' ? effect.purchaseOrderId : effect.orderId;
-  const order = await store.orderForNotice(effect.orderId, effect.purchaseOrderId);
-  const member = order && await auth.findById(order.memberId);
-  if (!member?.lineId || !(await store.claimNotification(member.id, 'line', kind, reference))) continue;
-  const text = kind === 'order_placed'
-   ? `【SALON STATION】ご注文を受け付けました。
-注文番号：${order.id}
-合計：¥${order.total.toLocaleString('ja-JP')}
-配送状況は購入履歴からご確認いただけます。`
-   : `【SALON STATION】商品を出荷しました。
-注文番号：${order.id}
-配送：${order.carrier} / 追跡番号 ${order.tracking}`;
-  line.notify(member.lineId, text)
-   .then(() => store.finishNotification('line', kind, reference, 'sent'))
-   .catch(error => { console.error('LINE notify:', error.message); return store.finishNotification('line', kind, reference, 'failed', error.message); })
-   .catch(error => console.error('LINE notify record:', error.message));
+  if (effect.type === 'order_placed' || effect.type === 'shipped') {
+   // お客様への通知：新規注文と出荷
+   const reference = effect.type === 'shipped' ? effect.purchaseOrderId : effect.orderId;
+   const order = await store.orderForNotice(effect.orderId, effect.purchaseOrderId);
+   const member = order && await auth.findById(order.memberId);
+   if (!member?.lineId) continue;
+   await notifyLine(member.id, member.lineId, effect.type, reference, effect.type === 'order_placed'
+    ? `【SALON STATION】ご注文を受け付けました。\n注文番号：${order.id}\n合計：¥${order.total.toLocaleString('ja-JP')}\n配送状況は購入履歴からご確認いただけます。`
+    : `【SALON STATION】商品を出荷しました。\n注文番号：${order.id}\n配送：${order.carrier} / 追跡番号 ${order.tracking}`, store);
+  }
+  if (effect.type === 'supply_placed' || effect.type === 'supply_shipped') {
+   // 加盟店スタッフへの通知：仕入発注の受付（定期発注を含む）と出荷
+   const order = await store.supplyForNotice(effect.supplyOrderId);
+   if (!order) continue;
+   const text = effect.type === 'supply_placed'
+    ? `【SALON STATION 本部】${order.source === 'subscription' ? '定期発注を作成しました' : '発注を受け付けました'}。\n発注番号：${order.id}\n合計：¥${order.total.toLocaleString('ja-JP')}`
+    : `【SALON STATION 本部】ご発注の商品を出荷しました。\n発注番号：${order.id}\n配送：${order.carrier} / 追跡番号 ${order.tracking}`;
+   for (const op of await store.operatorsWithLine(order.salonId)) await notifyLine(`op:${op.id}`, op.line_id, effect.type, `${order.id}:${op.id}`, text, store);
+  }
  }
-} });
+}
+const platformServer = await createPlatformServer(db, products, auth, { secure, concernNames: concernCategories, onChange, verifyLineToken: idToken => line.verify(idToken) });
+// 期日を迎えた定期発注を起動時と10分ごとに作成する
+async function runDueSubscriptions() {
+ try { const effects = [], result = await platformServer.store.runDueSubscriptions(new Date().toISOString(), effects); if (result.created.length || result.failed.length) console.log(`定期発注：作成${result.created.length}件・失敗${result.failed.length}件`); if (effects.length) await onChange({ effects, store: platformServer.store }); }
+ catch (error) { console.error('定期発注の実行に失敗しました:', error.message); }
+}
+await runDueSubscriptions();
+setInterval(runDueSubscriptions, 10 * 60 * 1000).unref();
 function json(res, status, body) { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); }
 function fail(message, status=400) { const e=new Error(message); e.status=status; throw e; }
 function appendCookie(res, value) { const previous = res.getHeader('Set-Cookie'); res.setHeader('Set-Cookie', [...(previous ? [].concat(previous) : []), value]); }

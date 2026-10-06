@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY, sku TEXT NOT NULL UNIQUE, brand TEXT NOT NULL, name TEXT NOT NULL,
   category_id TEXT NOT NULL REFERENCES categories(id), size TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
   image TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '',
-  price INTEGER NOT NULL CHECK (price BETWEEN 1 AND 1000000), cost INTEGER NOT NULL CHECK (cost >= 0),
+  price INTEGER NOT NULL CHECK (price BETWEEN 1 AND 1000000), cost INTEGER NOT NULL CHECK (cost >= 0), wholesale_price INTEGER NOT NULL DEFAULT 0,
   tax_rate INTEGER NOT NULL DEFAULT 10, dealer_id TEXT NOT NULL REFERENCES dealers(id),
   stock INTEGER NOT NULL CHECK (stock >= 0), enabled INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL);
@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS operators (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin','salon','dealer')),
   salon_id TEXT REFERENCES salons(id), dealer_id TEXT REFERENCES dealers(id),
-  password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+  password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, line_id TEXT, created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS operators_line_id ON operators(line_id);
 CREATE TABLE IF NOT EXISTS operator_sessions (
   token_hash TEXT PRIMARY KEY, operator_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
 
@@ -123,3 +124,40 @@ CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT, member_id TEXT NOT NULL, channel TEXT NOT NULL, kind TEXT NOT NULL, reference TEXT NOT NULL,
   status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE (channel, kind, reference));
+
+-- 加盟店（サロン）からフランチャイザーへの仕入発注。卸価格・お届け先（店舗）を発注時点で保存する。
+CREATE TABLE IF NOT EXISTS supply_orders (
+  id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE, salon_id TEXT NOT NULL REFERENCES salons(id),
+  operator_id TEXT NOT NULL, operator_name TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('manual','reorder','suggestion','subscription')), subscription_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('ordered','accepted','shipped','delivered','cancelled')),
+  subtotal INTEGER NOT NULL, shipping INTEGER NOT NULL, total INTEGER NOT NULL, tax_total INTEGER NOT NULL,
+  ship_name TEXT NOT NULL, ship_address TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+  carrier TEXT NOT NULL DEFAULT '', tracking TEXT NOT NULL DEFAULT '', shipped_at TEXT, delivered_at TEXT,
+  billing_month TEXT NOT NULL, invoice_id TEXT, stock_restored INTEGER NOT NULL DEFAULT 0,
+  ordered_on TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS supply_orders_salon ON supply_orders(salon_id, created_at);
+CREATE INDEX IF NOT EXISTS supply_orders_billing ON supply_orders(billing_month, salon_id);
+CREATE TABLE IF NOT EXISTS supply_order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, supply_order_id TEXT NOT NULL REFERENCES supply_orders(id), line_no INTEGER NOT NULL,
+  product_id TEXT NOT NULL, sku TEXT NOT NULL, name TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '',
+  unit_price INTEGER NOT NULL, quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 999), tax_rate INTEGER NOT NULL DEFAULT 10);
+CREATE INDEX IF NOT EXISTS supply_order_items_order ON supply_order_items(supply_order_id, line_no);
+-- 定期発注（毎週・2週間ごと・毎月）
+CREATE TABLE IF NOT EXISTS supply_subscriptions (
+  id TEXT PRIMARY KEY, salon_id TEXT NOT NULL REFERENCES salons(id), operator_id TEXT NOT NULL,
+  interval_code TEXT NOT NULL CHECK (interval_code IN ('weekly','biweekly','monthly')), next_run_on TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, last_run_on TEXT NOT NULL DEFAULT '', last_result TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS supply_subscriptions_due ON supply_subscriptions(active, next_run_on);
+CREATE TABLE IF NOT EXISTS supply_subscription_items (
+  subscription_id TEXT NOT NULL REFERENCES supply_subscriptions(id) ON DELETE CASCADE, product_id TEXT NOT NULL REFERENCES products(id),
+  quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 999), line_no INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (subscription_id, product_id));
+-- 月末締めの請求書（加盟店ごと・月ごとに1通）
+CREATE TABLE IF NOT EXISTS invoices (
+  id TEXT PRIMARY KEY, salon_id TEXT NOT NULL REFERENCES salons(id), billing_month TEXT NOT NULL,
+  bill_to_name TEXT NOT NULL, bill_to_address TEXT NOT NULL, salon_name TEXT NOT NULL,
+  issued_on TEXT NOT NULL, due_on TEXT NOT NULL, order_count INTEGER NOT NULL,
+  subtotal INTEGER NOT NULL, tax_total INTEGER NOT NULL, total INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('issued','paid')), paid_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (salon_id, billing_month));

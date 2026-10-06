@@ -1,4 +1,5 @@
 // Shared business rules for the local server and the browser-only public demo.
+import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf } from './supply-core.js';
 export const demoOperators = [
   {id:'admin',role:'admin',name:'運営管理者',email:'admin@example.test'},
   {id:'salon-a',role:'salon',salonId:'lumiere',name:'LUMIÈRE 店舗担当',email:'salon@example.test'},
@@ -69,12 +70,14 @@ export function migrate(state,catalog){
   for(const p of state.profiles||[]){for(const k of ['kana','phone','gender','birthday'])if(p[k]===undefined){p[k]='';changed=true;}if(p.lineLinked===undefined){p.lineLinked=false;changed=true;}}
   if(state.salonSeq===undefined&&Array.isArray(state.salons)){state.salonSeq=salonSeqFrom(state.salons);changed=true;}
   if(!state.carts){state.carts={};changed=true;}if(!state.favorites){state.favorites={};changed=true;}
+  for(const p of state.products||[])if(p.wholesalePrice===undefined){p.wholesalePrice=wholesaleOf(p.price);changed=true;}
+  for(const k of ['supplyOrders','supplySubscriptions','invoices'])if(!Array.isArray(state[k])){state[k]=[];changed=true;}
   return changed;
 }
 
 export const seedDealers=()=>[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}];
 export function createPlatform(catalog,now=new Date().toISOString()){
-  const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
+  const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
     salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[]};
   // Clearly fictional examples make the management screens useful on first visit.
   for(let i=0;i<8;i++){
@@ -86,9 +89,10 @@ export function createPlatform(catalog,now=new Date().toISOString()){
     order.sample=true;order.createdAt=when;
     if(i>0){state.purchaseOrders.filter(p=>p.orderId===order.id).forEach(p=>{p.status=i<3?'accepted':i<5?'shipped':'delivered';if(i>=3){p.tracking='DEMO-'+String(100000+i);p.carrier='デモ配送';p.shippedAt=when;}});refreshOrder(state,order);}
   }
+  seedSupply(state,now);
   return state;
 }
-function safeProducts(state){return state.products.filter(p=>p.enabled).map(({cost,...p})=>clone(p));}
+function safeProducts(state){return state.products.filter(p=>p.enabled).map(({cost,wholesalePrice,...p})=>clone(p));}
 function salonFor(state,id){const salon=state.salons.find(s=>s.id===id);if(!salon)fail('サロンが見つかりません。',404);return salon;}
 function quote(state,input){
   const salon=salonFor(state,input?.salonId);if(!salon.enabled)fail('このサロンは現在受注を停止しています。',409);
@@ -204,7 +208,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     return {operator:clone(op),revision:state.revision,products:clone(state.products.filter(p=>op.role!=='dealer'||p.dealerId===op.dealerId)),salons:clone(state.salons.filter(s=>op.role==='admin'||op.role==='salon'&&s.id===op.salonId||op.role==='dealer'&&pos.some(p=>p.salonId===s.id))),dealers:clone(state.dealers.filter(d=>op.role!=='dealer'||d.id===op.dealerId)),
       orders:orders.map(o=>({...customerOrder(state,o),fee:o.fee,items:clone(o.items)})),
       purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:clone(o.customer)};}),
-      profiles:op.role==='dealer'?[]:clone(state.profiles.filter(p=>op.role==='admin'||p.salonId===op.salonId)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[]};
+      profiles:op.role==='dealer'?[]:clone(state.profiles.filter(p=>op.role==='admin'||p.salonId===op.salonId)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
   }
   const poAction=route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
   if(poAction&&method==='PATCH'){
@@ -224,8 +228,8 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   if(productAction&&method==='PATCH'){
     const op=requireOperator(actor,['admin','dealer']),p=state.products.find(p=>p.id===productAction[1]);if(!p)fail('商品が見つかりません。',404);if(op.role==='dealer'&&p.dealerId!==op.dealerId)fail('他社の商品は操作できません。',403);
     const update={stock:int(input?.stock,0,99999)};
-    if(op.role==='admin'){update.price=int(input.price,1,1000000);update.cost=int(input.cost,0,1000000);if(update.cost>update.price)fail('このデモでは仕入単価を売価以下に設定してください。');if(typeof input.enabled!=='boolean')fail('公開設定を確認してください。');update.enabled=input.enabled;}
-    else if(['price','cost','enabled'].some(k=>input[k]!==undefined))fail('ディーラーは在庫数のみ更新できます。',403);
+    if(op.role==='admin'){update.price=int(input.price,1,1000000);update.cost=int(input.cost,0,1000000);update.wholesalePrice=int(input.wholesalePrice??p.wholesalePrice,0,1000000);if(update.cost>update.price)fail('このデモでは仕入単価を売価以下に設定してください。');if(update.wholesalePrice>update.price)fail('卸価格は売価以下にしてください。');if(typeof input.enabled!=='boolean')fail('公開設定を確認してください。');update.enabled=input.enabled;}
+    else if(['price','cost','enabled','wholesalePrice'].some(k=>input[k]!==undefined))fail('ディーラーは在庫数のみ更新できます。',403);
     Object.assign(p,update);log(state,op,'商品・在庫を更新',p.sku,now);return clone(p);
   }
   // 店舗登録（仕様書 2.1.1 / AD-002）：店舗IDは自動採番。QRコードは店舗IDから都度生成する。
@@ -257,5 +261,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const salon=salonFor(state,input?.salonId);if(!salon.enabled&&salon.id!==profile.salonId)fail('受付を停止しているサロンには紐付けできません。',409);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
     profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',profile.id,now);return clone(profile);
   }
+  // 加盟店からの仕入発注・定期発注・月次請求（supply-core.js）
+  const supply=supplyRequest(state,route,method,input,actor,now,effects);if(supply!==undefined)return supply;
   fail('この操作は利用できません。',404);
 }

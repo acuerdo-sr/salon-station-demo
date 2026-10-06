@@ -2,7 +2,7 @@
 import { api, isPages } from './api-client.js';
 let configPromise;
 export function lineConfig() {
-  configPromise ??= isPages ? Promise.resolve({ enabled: true, demo: true, liffId: '', notifications: false }) : api('/auth/line/config').then(c => ({ demo: false, ...c })).catch(() => ({ enabled: false, demo: false, liffId: '' }));
+  configPromise ??= isPages ? Promise.resolve({ enabled: true, demo: true, liffId: '', orderLiffId: '', notifications: false }) : api('/auth/line/config').then(c => ({ demo: false, ...c })).catch(() => ({ enabled: false, demo: false, liffId: '' }));
   return configPromise;
 }
 // LINEログイン開始URL。QR経由の店舗・担当スタッフはサーバー側で保持し、登録完了後に紐付ける。
@@ -38,4 +38,15 @@ export async function initLiff(liffId) {
     console.error('LIFF:', error.message);
     return false;
   }
+}
+// 加盟店の発注画面（LIFF）：LINEアプリ内で開かれたときだけ IDトークンを返す。通常のブラウザでは null。
+export async function liffIdToken(liffId) {
+  if (!liffId || isPages) return null;
+  if (typeof window.liff === 'undefined' && !(await loadSdk())) return null;
+  try {
+    await window.liff.init({ liffId });
+    if (!window.liff.isInClient()) return null;
+    if (!window.liff.isLoggedIn()) { window.liff.login({ redirectUri: location.href }); return null; }
+    return window.liff.getIDToken() || null;
+  } catch (error) { console.error('LIFF:', error.message); return null; }
 }
