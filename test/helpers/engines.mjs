@@ -28,17 +28,23 @@ async function sqlEngine(db, now) {
     close: () => db.close(),
   };
 }
+let mysqlSeq = 0;
 export function engines(now) {
   const list = [
     ['browser', async () => { const state = createPlatform(products, now); return { state, call: async (route, method, input, actor = {}, at = now, effects = []) => platformRequest(state, route, method, input, actor, at, effects), member: async (id, name = 'デモ 花子') => ({ member: { id, name, email: `${id}@example.test`, kana: KANA } }), close: async () => {} }; }],
     ['sqlite', async () => sqlEngine(await createSqliteAdapter(':memory:'), now)],
   ];
+  // テストファイルは並行して動くため、エンジンごとに専用のデータベースを作り、終わったら消す
+  // （TEST_MYSQL_URL のユーザーにはデータベースの作成・削除の権限が要る）
   if (process.env.TEST_MYSQL_URL) list.push(['mysql', async () => {
-    const db = await createMysqlAdapter(process.env.TEST_MYSQL_URL);
-    await db.exec('SET FOREIGN_KEY_CHECKS=0');
-    for (const table of TABLES) await db.exec(`DROP TABLE IF EXISTS ${table}`);
-    await db.exec('SET FOREIGN_KEY_CHECKS=1');
-    return sqlEngine(db, now);
+    const base = new URL(process.env.TEST_MYSQL_URL), name = `${base.pathname.slice(1) || 'salon_test'}_${process.pid}_${++mysqlSeq}`;
+    const server = new URL(base); server.pathname = '/';
+    const admin = await createMysqlAdapter(server.href);
+    await admin.exec(`CREATE DATABASE \`${name}\``);
+    const url = new URL(base); url.pathname = '/' + name;
+    const db = await createMysqlAdapter(url.href);
+    const engine = await sqlEngine(db, now);
+    return { ...engine, close: async () => { await db.close(); await admin.exec(`DROP DATABASE \`${name}\``); await admin.close(); } };
   }]);
   return list;
 }

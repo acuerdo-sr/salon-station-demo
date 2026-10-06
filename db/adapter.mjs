@@ -49,7 +49,7 @@ export async function createSqliteAdapter(file) {
   return adapter;
 }
 
-// MySQL 8.0（mysql2）。DATABASE_URL=mysql://user:pass@host:3306/dbname
+// MySQL 8.4（mysql2）。DATABASE_URL=mysql://user:pass@host:3306/dbname
 export async function createMysqlAdapter(url) {
   let mysql;
   try { mysql = await import('mysql2/promise'); }

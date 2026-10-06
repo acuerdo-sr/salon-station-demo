@@ -1,4 +1,4 @@
--- SALON STATION テーブル定義（MySQL 8.0）。SQLite 用 schema.sqlite.sql と同じ表・列。
+-- SALON STATION テーブル定義（MySQL 8.4 LTS。8.0 の構文の範囲で書いている）。SQLite 用 schema.sqlite.sql と同じ表・列。
 -- 文字コードは utf8mb4。金額は円の整数（税込）、日時は UTC の ISO 8601 文字列、ordered_on は日本時間の注文日。
 
 CREATE TABLE IF NOT EXISTS app_meta (meta_key VARCHAR(64) PRIMARY KEY, meta_value VARCHAR(255) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
