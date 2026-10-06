@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
 import { memberRef } from '../dist/privacy.js';
-import { demoTokenize, COD_FEE } from '../dist/payment-core.js';
+import { demoTokenize } from '../dist/payment-core.js';
 import { SHIPPING_COLUMNS } from '../dist/shipping-csv.js';
 import { engines } from './helpers/engines.mjs';
 
@@ -60,7 +60,7 @@ for (const [name, create] of engines(now)) {
     assert.deepEqual(wallet.cards.map(c => [c.brand, c.last4, c.isDefault]), [['visa', '4242', false], ['mastercard', '4444', true]]);
     assert.ok(!JSON.stringify(wallet).includes('tok_test_'), '画面にはトークンを返さない');
     const paid = await order(e, taro, { payment: { method: 'card', cardId: wallet.cards[1].id } });
-    assert.deepEqual([paid.paymentMethod, paid.paymentStatus, paid.paymentFee, paid.total], ['card', 'captured', 0, 2860 + 660]);
+    assert.deepEqual([paid.paymentMethod, paid.paymentStatus, paid.total], ['card', 'captured', 2860 + 660]);
     assert.equal(paid.payment, 'クレジットカード・決済完了');
     // 承認されないカードでは注文を作らず、在庫も減らさない
     await assert.rejects(order(e, taro, { payment: { method: 'card', card: card('4000000000000002') } }), /承認されませんでした/);
@@ -71,9 +71,9 @@ for (const [name, create] of engines(now)) {
     assert.deepEqual(wallet.cards.map(c => c.last4).sort(), ['0000', '4242', '4444']);
     await assert.rejects(e.call('/payment-methods/cards', 'POST', { card: { ...card('4242424242424242'), expYear: 2020 } }, taro), /有効期限/);
     await assert.rejects(e.call('/payment-methods/cards', 'POST', { card: { token: '4242424242424242', brand: 'visa', last4: '4242', expMonth: 1, expYear: 2030 } }, taro), /カード情報/);
-    wallet = await e.call('/payment-methods', 'PATCH', { defaultMethod: 'cod' }, taro);
-    assert.equal(wallet.defaultMethod, 'cod');
-    await assert.rejects(e.call('/payment-methods', 'PATCH', { defaultMethod: 'bitcoin' }, taro), /お支払い方法/);
+    wallet = await e.call('/payment-methods', 'PATCH', { defaultCardId: wallet.cards.find(c => c.last4 === '4242').id }, taro);
+    assert.equal(wallet.cards.find(c => c.isDefault).last4, '4242');
+    await assert.rejects(e.call('/payment-methods', 'PATCH', { defaultCardId: 'cd-none' }, taro), /カードが見つかりません/);
     wallet = await e.call(`/payment-methods/cards/${wallet.cards.find(c => c.isDefault).id}`, 'DELETE', undefined, taro);
     assert.equal(wallet.cards.length, 2); assert.equal(wallet.cards.filter(c => c.isDefault).length, 1);
     const other = await linked(e, 'kojin-hanako');
@@ -81,41 +81,16 @@ for (const [name, create] of engines(now)) {
     if (e.sql) assert.ok((await e.db.all('SELECT token FROM member_cards')).every(r => r.token.startsWith('enc:v1:')));
   });
 
-  run('cash on delivery adds the fee, ships from one place only, and is paid when delivered', async e => {
-    const taro = await linked(e, 'kojin-taro');
-    await assert.rejects(order(e, taro, { payment: { method: 'cod' } }, twoDealers), /1か所から発送/);
-    const cod = await order(e, taro, { payment: { method: 'cod' } });
-    assert.deepEqual([cod.paymentStatus, cod.paymentFee, cod.total], ['pending', COD_FEE, 2860 + 660 + COD_FEE]);
-    assert.equal(cod.payment, '代金引換（お届け時にお支払い）');
-    const po = cod.shipments[0].id;
-    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'accepted' }, sena);
-    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'shipped', carrier: '佐川急便', tracking: 'SG-1' }, sena);
-    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'delivered' }, sena);
-    const done = (await e.call('/orders', 'GET', undefined, taro)).find(o => o.id === cod.id);
-    assert.equal(done.paymentStatus, 'captured'); assert.ok(done.timeline.some(t => t.label === '代金引換のお支払いを受け取りました'));
-  });
-
-  run('bank transfer and convenience-store payments wait for payment: dealers cannot accept until headquarters confirms; unpaid cancellations are voided', async e => {
-    const taro = await linked(e, 'kojin-taro');
-    const bank = await order(e, taro, { payment: { method: 'bank' } });
-    assert.deepEqual([bank.paymentStatus, bank.paymentDueOn], ['pending', '2026-10-13']); assert.ok(bank.paymentReference);
-    const po = bank.shipments[0].id;
-    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, sena)).purchaseOrders.find(p => p.id === po).awaitingPayment, true);
-    await assert.rejects(e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'accepted' }, sena), /入金の確認後/);
-    await assert.rejects(e.call(`/admin/orders/${bank.id}/payment`, 'POST', {}, salonOp), /権限/);
-    const paid = await e.call(`/admin/orders/${bank.id}/payment`, 'POST', {}, admin);
-    assert.equal(paid.paymentStatus, 'captured');
-    assert.equal((await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'accepted' }, sena)).status, 'accepted');
-    const konbini = await order(e, taro, { payment: { method: 'konbini' } });
-    assert.match(konbini.paymentReference, /^KB\d{10}$/); assert.equal(konbini.paymentDueOn, '2026-10-09');
-    const cancelled = await e.call(`/orders/${konbini.id}/cancel`, 'POST', {}, taro);
-    assert.deepEqual([cancelled.status, cancelled.paymentStatus], ['cancelled', 'voided']);
-    assert.ok(cancelled.timeline.some(t => t.label === '注文キャンセル（お支払いは発生していません）'));
-    const settle = (await e.call('/admin/snapshot', 'GET', undefined, admin)).settlements.find(s => s.orderId === konbini.id);
-    assert.equal(settle.refunded, 0, '入金前の取消は返金ではない');
-    await assert.rejects(e.call(`/admin/orders/${konbini.id}/payment`, 'POST', {}, admin), /確認できません/);
-    const card = await order(e, taro);
-    await assert.rejects(e.call(`/admin/orders/${card.id}/payment`, 'POST', {}, admin), /前払いの注文ではありません/);
+  run('payment is by credit card only: other methods are rejected and cancellations refund the card', async e => {
+    const taro = await linked(e, 'kojin-taro'), before = await stockOf(e, 'shampoo-moist');
+    for (const method of ['cod', 'bank', 'konbini', 'amazon_pay']) await assert.rejects(order(e, taro, { payment: { method } }), /クレジットカードのみ/, method);
+    assert.equal(await stockOf(e, 'shampoo-moist'), before, '断った注文は在庫を確保しない');
+    const paid = await order(e, taro, { payment: { method: 'card', card: card('4242424242424242') } });
+    assert.deepEqual([paid.paymentMethod, paid.paymentStatus, paid.total], ['card', 'captured', 2860 + 660]);
+    assert.ok(paid.timeline.some(t => t.label === 'ご注文・カード決済完了（テスト）'));
+    const cancelled = await e.call(`/orders/${paid.id}/cancel`, 'POST', {}, taro);
+    assert.deepEqual([cancelled.paymentStatus, cancelled.payment], ['refunded', 'クレジットカード・返金済み']);
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, admin)).settlements.find(x => x.orderId === paid.id).refunded, paid.total);
   });
 
   run('the salon edits its own customers (not the e-mail); other salons and headquarters cannot', async e => {
@@ -132,21 +107,19 @@ for (const [name, create] of engines(now)) {
     if (e.sql) assert.equal(e.fieldCrypto.decrypt((await e.db.get("SELECT name FROM members WHERE id='kojin-taro'")).name), '個人 太郎（変更）');
   });
 
-  run('shipping instruction CSV: dealers export unshipped, paid orders with phone and split address; access is recorded; headquarters exports franchisee orders', async e => {
+  run('shipping instruction CSV: dealers export unshipped orders with phone and split address; access is recorded; headquarters exports franchisee orders', async e => {
     const taro = await linked(e, 'kojin-taro');
-    const cod = await order(e, taro, { payment: { method: 'cod' } });
-    const bank = await order(e, taro, { payment: { method: 'bank' } });
-    const po = cod.shipments[0].id;
+    const paid = await order(e, taro);
+    const po = paid.shipments[0].id;
     const csv = await e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, { ...sena, ip: '192.0.2.8' });
     assert.deepEqual(csv.columns, SHIPPING_COLUMNS); assert.match(csv.filename, /^出荷指示_EC注文_20261006\.csv$/);
     const row = Object.fromEntries(csv.columns.map((c, i) => [c, csv.rows[0][i]]));
     assert.equal(row['お客様管理番号'], po); assert.equal(row['お届け先電話番号'], '090-1234-5678'); assert.equal(row['お届け先郵便番号'], '1234567');
     assert.equal(row['お届け先住所1'] + row['お届け先住所2'] + row['お届け先住所3'], home.address); assert.ok([...row['お届け先住所1']].length <= 16);
     assert.equal(row['お届け先名称1'], home.name); assert.equal(row['ご依頼主名称1'], 'LUMIÈRE 表参道'); assert.equal(row['品名1'], 'モイストリペア シャンプー ×1');
-    assert.equal(row['代引金額'], cod.total); assert.equal(row['便種'], '飛脚宅配便'); assert.equal(row['記事'], `注文 ${cod.id}`);
+    assert.ok(!csv.columns.includes('代引金額'), 'カード決済のみなので代引きの列はない'); assert.equal(row['便種'], '飛脚宅配便'); assert.equal(row['記事'], `注文 ${paid.id}`);
     const logs = (await e.call('/admin/snapshot', 'GET', undefined, salonOp, later(1))).accessLogs;
     assert.ok(logs.some(l => l.role === 'ディーラー' && l.action === 'CSV出力' && l.target === '出荷指示（お名前・住所・電話番号）' && l.count === 1));
-    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [bank.shipments[0].id] }, sena), /入金確認済み/);
     await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, botanica), /出力できない/);
     await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, admin), /権限/);
     await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [] }, sena), /選んでください/);
@@ -199,16 +172,19 @@ for (const [name, create] of engines(now)) {
   });
 }
 
-test('the same scenario gives the same orders and payment states in the browser demo and the database', async () => {
+test('the same scenario gives the same orders and card payments in the browser demo and the database', async () => {
   const results = [];
   for (const [name, create] of engines(now)) {
     const e = await create();
     try {
       const taro = await e.member('kojin-taro', '個人 太郎'); await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: '' }, taro);
       const place = extra => e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: shampoo, customer: home, ...extra }, taro);
-      const list = [await place({ payment: { method: 'card' } }), await place({ payment: { method: 'cod' } }), await place({ payment: { method: 'bank' } }), await place({ payment: { method: 'konbini' } })];
-      results.push([name, list.map(o => ({ method: o.paymentMethod, status: o.paymentStatus, fee: o.paymentFee, total: o.total, payment: o.payment, phone: o.customer.phone, timeline: o.timeline.map(t => t.label) }))]);
+      const wallet = await e.call('/payment-methods/cards', 'POST', { card: card('5555555555554444') }, taro);
+      const list = [await place({ payment: { method: 'card' } }), await place({ payment: { method: 'card', cardId: wallet.cards[0].id } }), await place({ payment: { method: 'card', card: card('3530111333300000'), saveCard: true } })];
+      await assert.rejects(place({ payment: { method: 'card', card: card('4000000000000002') } }), /承認されませんでした/);
+      const cancelled = await e.call(`/orders/${list[0].id}/cancel`, 'POST', {}, taro);
+      results.push([name, [...list, cancelled].map(o => ({ method: o.paymentMethod, status: o.paymentStatus, total: o.total, payment: o.payment, phone: o.customer.phone, timeline: o.timeline.map(t => t.label) })), (await e.call('/payment-methods', 'GET', undefined, taro)).cards.map(c => [c.brand, c.last4, c.isDefault])]);
     } finally { await e.close(); }
   }
-  for (const [name, list] of results.slice(1)) assert.deepEqual(list, results[0][1], name);
+  for (const [name, list, cards] of results.slice(1)) { assert.deepEqual(list, results[0][1], name); assert.deepEqual(cards, results[0][2], name); }
 });

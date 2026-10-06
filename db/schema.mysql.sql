@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS members (
   id VARCHAR(40) PRIMARY KEY, email VARCHAR(512) NOT NULL, email_index VARCHAR(64) NULL, password_salt VARCHAR(64) NOT NULL, password_hash VARCHAR(128) NOT NULL,
   name VARCHAR(512) NOT NULL, kana VARCHAR(512) NOT NULL DEFAULT '', phone VARCHAR(128) NOT NULL DEFAULT '', gender VARCHAR(128) NOT NULL DEFAULT '', birthday VARCHAR(128) NOT NULL DEFAULT '',
   line_id VARCHAR(100) NULL UNIQUE, salon_id VARCHAR(20) NULL, staff_id VARCHAR(40) NULL, salon_linked_at VARCHAR(30) NULL,
-  privacy_version VARCHAR(20) NULL, privacy_agreed_at VARCHAR(30) NULL, default_payment_method VARCHAR(20) NOT NULL DEFAULT '',
+  privacy_version VARCHAR(20) NULL, privacy_agreed_at VARCHAR(30) NULL,
   created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   UNIQUE KEY members_email_index (email_index), KEY members_salon (salon_id), FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (staff_id) REFERENCES staff(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS orders (
   member_id VARCHAR(40) NOT NULL, salon_id VARCHAR(20) NOT NULL,
   salon_name VARCHAR(100) NOT NULL, seller VARCHAR(100) NOT NULL, staff_id VARCHAR(40) NOT NULL DEFAULT '', staff_name VARCHAR(40) NOT NULL,
   fee_rate INT NOT NULL, fee INT NOT NULL, subtotal INT NOT NULL, shipping INT NOT NULL, total INT NOT NULL, tax_total INT NOT NULL,
-  payment_method VARCHAR(20) NOT NULL DEFAULT 'card', payment_fee INT NOT NULL DEFAULT 0,
+  payment_method VARCHAR(20) NOT NULL DEFAULT 'card',
   status VARCHAR(20) NOT NULL, payment_status VARCHAR(20) NOT NULL,
   ship_name VARCHAR(512) NOT NULL, ship_postal VARCHAR(128) NOT NULL, ship_address VARCHAR(1500) NOT NULL, ship_phone VARCHAR(256) NOT NULL DEFAULT '', ship_email VARCHAR(512) NOT NULL,
   return_reason VARCHAR(1700) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, is_sample TINYINT(1) NOT NULL DEFAULT 0,
@@ -135,9 +135,7 @@ CREATE TABLE IF NOT EXISTS order_events (
 
 CREATE TABLE IF NOT EXISTS payments (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, order_id VARCHAR(40) NOT NULL, provider VARCHAR(40) NOT NULL, provider_payment_id VARCHAR(100) NOT NULL,
-  amount INT NOT NULL, status VARCHAR(20) NOT NULL,
-  method VARCHAR(20) NOT NULL DEFAULT 'card', reference VARCHAR(60) NOT NULL DEFAULT '', due_on VARCHAR(10) NOT NULL DEFAULT '',
-  created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
+  amount INT NOT NULL, status VARCHAR(20) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY payments_order (order_id), FOREIGN KEY (order_id) REFERENCES orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS refunds (

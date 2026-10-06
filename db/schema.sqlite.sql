@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY, email TEXT NOT NULL, email_index TEXT, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL,
   name TEXT NOT NULL, kana TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', gender TEXT NOT NULL DEFAULT '', birthday TEXT NOT NULL DEFAULT '',
   line_id TEXT UNIQUE, salon_id TEXT REFERENCES salons(id), staff_id TEXT REFERENCES staff(id), salon_linked_at TEXT,
-  privacy_version TEXT, privacy_agreed_at TEXT, default_payment_method TEXT NOT NULL DEFAULT '',
+  privacy_version TEXT, privacy_agreed_at TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS members_salon ON members(salon_id);
 CREATE UNIQUE INDEX IF NOT EXISTS members_email_index ON members(email_index);
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS orders (
   member_id TEXT NOT NULL REFERENCES members(id), salon_id TEXT NOT NULL REFERENCES salons(id),
   salon_name TEXT NOT NULL, seller TEXT NOT NULL, staff_id TEXT NOT NULL DEFAULT '', staff_name TEXT NOT NULL,
   fee_rate INTEGER NOT NULL, fee INTEGER NOT NULL, subtotal INTEGER NOT NULL, shipping INTEGER NOT NULL, total INTEGER NOT NULL, tax_total INTEGER NOT NULL,
-  payment_method TEXT NOT NULL DEFAULT 'card' CHECK (payment_method IN ('card','cod','bank','konbini')), payment_fee INTEGER NOT NULL DEFAULT 0,
+  payment_method TEXT NOT NULL DEFAULT 'card',
   status TEXT NOT NULL CHECK (status IN ('ordered','processing','partially_shipped','shipped','delivered','cancelled','return_requested','returned')),
   payment_status TEXT NOT NULL CHECK (payment_status IN ('pending','captured','refunded','voided')),
   ship_name TEXT NOT NULL, ship_postal TEXT NOT NULL, ship_address TEXT NOT NULL, ship_phone TEXT NOT NULL DEFAULT '', ship_email TEXT NOT NULL,
@@ -125,13 +125,10 @@ CREATE TABLE IF NOT EXISTS order_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id), occurred_at TEXT NOT NULL, label TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS order_events_order ON order_events(order_id, id);
 
--- 決済・返金（カード情報は持たず、決済代行の取引IDと状態だけを保存する）。
--- method：card（クレジットカード）・cod（代金引換）・bank（銀行振込）・konbini（コンビニ払い）。reference はお支払い番号、due_on は支払期限
+-- 決済・返金（お支払いはクレジットカードのみ。カード情報は持たず、決済代行の取引IDと状態だけを保存する）
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id), provider TEXT NOT NULL,
-  provider_payment_id TEXT NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL,
-  method TEXT NOT NULL DEFAULT 'card', reference TEXT NOT NULL DEFAULT '', due_on TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  provider_payment_id TEXT NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS payments_order ON payments(order_id);
 CREATE TABLE IF NOT EXISTS refunds (
   id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id), amount INTEGER NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);

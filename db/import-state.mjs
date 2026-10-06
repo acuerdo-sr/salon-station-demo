@@ -75,12 +75,12 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   const orders = [...(state.orders || [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const o of orders) {
     // 支払方法がない以前の注文は、テスト決済（カード）として扱う
-    const method = o.paymentMethod || 'card', paymentStatus = o.paymentStatus || (/返金/.test(o.payment || '') ? 'refunded' : 'captured');
+    const paymentStatus = o.paymentStatus || (/返金/.test(o.payment || '') ? 'refunded' : 'captured');
     await tx.run(`INSERT INTO orders (id, request_key, fingerprint, member_id, salon_id, salon_name, seller, staff_id, staff_name, fee_rate, fee, subtotal, shipping, total, tax_total,
-      payment_method, payment_fee, status, payment_status, ship_name, ship_postal, ship_address, ship_phone, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      payment_method, status, payment_status, ship_name, ship_postal, ship_address, ship_phone, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'card', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [o.id, o.requestKey || `legacy-${o.id}`, c.digest(o.fingerprint || ''), o.memberId, o.salonId, o.salonName, o.seller || o.salonName, o.staffId || '', o.staffName || '指名なし', o.feeRate ?? 0, o.fee ?? 0, o.subtotal, o.shipping, o.total, includedTax(o.total),
-      method, o.paymentFee || 0, o.status, paymentStatus, ...[o.customer?.name, o.customer?.postal, o.customer?.address, o.customer?.phone, o.customer?.email].map(v => c.encrypt(v || '')), o.returnReason ? c.encrypt(o.returnReason) : null, o.stockRestored ? 1 : 0, o.sample ? 1 : 0,
+      o.status, paymentStatus, ...[o.customer?.name, o.customer?.postal, o.customer?.address, o.customer?.phone, o.customer?.email].map(v => c.encrypt(v || '')), o.returnReason ? c.encrypt(o.returnReason) : null, o.stockRestored ? 1 : 0, o.sample ? 1 : 0,
       jst(o.createdAt).slice(0, 10), o.createdAt, now]);
     const pos = (state.purchaseOrders || []).filter(p => p.orderId === o.id).sort((a, b) => a.id.localeCompare(b.id));
     for (const [i, po] of pos.entries()) {
@@ -95,7 +95,7 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
       [o.id, po.id, i + 1, item.id, skuOf(item.id), item.name, item.size || '', item.image || '', item.price, item.cost ?? 0, item.quantity, item.dealerId || po.dealerId]);
     }
     for (const e of o.timeline || []) await tx.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [o.id, e.at, e.label]);
-    await tx.run("INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, method, reference, due_on, created_at, updated_at) VALUES (?, 'test', ?, ?, ?, ?, ?, ?, ?, ?)", [o.id, `test_${o.id}`, o.total, paymentStatus, method, o.paymentReference || '', o.paymentDueOn || '', o.createdAt, now]);
+    await tx.run("INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, created_at, updated_at) VALUES (?, 'test', ?, ?, ?, ?, ?)", [o.id, `test_${o.id}`, o.total, paymentStatus, o.createdAt, now]);
     if (paymentStatus === 'refunded') await tx.run('INSERT INTO refunds (order_id, amount, reason, created_at) VALUES (?, ?, ?, ?)', [o.id, o.total, o.returnReason ? '返品' : 'キャンセル', now]);
   }
   // 操作履歴（古いものから）

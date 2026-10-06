@@ -121,19 +121,19 @@ test('a version-4 database is upgraded: the orders table is rebuilt to allow pen
   try {
     await createPlatformStore(db, { catalog: products, concernNames: concernCategories }).init({ now });
     const before = Number((await db.get('SELECT COUNT(*) AS n FROM orders')).n);
-    // 版4の注文の表（支払方法・代引き手数料・電話番号の列がなく、支払状態は決済済み・返金済みだけ）
+    // 版4の注文の表（支払方法・電話番号の列がなく、支払状態は決済済み・返金済みだけ）
     const v4 = schemaTable('sqlite', 'orders').replace('CREATE TABLE IF NOT EXISTS orders', 'CREATE TABLE orders_v4')
       .replace(/\s*payment_method TEXT[^\n]*\n/, '\n').replace("('pending','captured','refunded','voided')", "('captured','refunded')").replace(" ship_phone TEXT NOT NULL DEFAULT '',", '');
     assert.ok(!v4.includes('payment_method') && !v4.includes('ship_phone') && v4.includes("('captured','refunded')"));
-    const keep = (await db.tableColumns('orders')).filter(c => !['payment_method', 'payment_fee', 'ship_phone'].includes(c)).join(', ');
+    const keep = (await db.tableColumns('orders')).filter(c => !['payment_method', 'ship_phone'].includes(c)).join(', ');
     await db.exec('PRAGMA foreign_keys=OFF');
     await db.exec(`${v4}; INSERT INTO orders_v4 (${keep}) SELECT ${keep} FROM orders; DROP TABLE orders; ALTER TABLE orders_v4 RENAME TO orders;`);
     await db.exec('PRAGMA foreign_keys=ON');
-    await db.exec("ALTER TABLE member_addresses DROP COLUMN phone; ALTER TABLE payments DROP COLUMN method; ALTER TABLE payments DROP COLUMN reference; ALTER TABLE payments DROP COLUMN due_on; ALTER TABLE members DROP COLUMN default_payment_method; DROP TABLE member_cards; DROP TABLE password_resets; DROP TABLE mail_outbox; UPDATE app_meta SET meta_value='4' WHERE meta_key='schema_version'");
+    await db.exec("ALTER TABLE member_addresses DROP COLUMN phone; DROP TABLE member_cards; DROP TABLE password_resets; DROP TABLE mail_outbox; UPDATE app_meta SET meta_value='4' WHERE meta_key='schema_version'");
     const store = createPlatformStore(db, { catalog: products, concernNames: concernCategories });
     await store.init({ now });
     assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '5');
-    for (const column of ['payment_method', 'payment_fee', 'ship_phone']) assert.ok((await db.tableColumns('orders')).includes(column), column);
+    for (const column of ['payment_method', 'ship_phone']) assert.ok((await db.tableColumns('orders')).includes(column), column);
     assert.ok((await db.tableColumns('member_addresses')).includes('phone'));
     for (const table of ['member_cards', 'password_resets', 'mail_outbox']) assert.ok(await db.tableExists(table), table);
     assert.equal(Number((await db.get('SELECT COUNT(*) AS n FROM orders')).n), before);

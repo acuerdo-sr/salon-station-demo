@@ -5,9 +5,9 @@ import {
   fail, required, int, salonInput, staffList, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
   settlement, requireOperator, allowedOrder, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
-  addressInput, sortAddresses, addressView, cardView, awaitingPayment, MAX_ADDRESSES,
+  addressInput, sortAddresses, addressView, cardView, sortCards, MAX_ADDRESSES,
 } from '../dist/platform-core.js';
-import { paymentInput, paymentFeeOf, initialPaymentStatus, prepaid, paymentLabel, testCharge, paymentInstructions, cardInput, orderPlacedLabel, paymentAfterCancel, COD_SPLIT_MESSAGE, PAYMENT_METHODS, MAX_CARDS } from '../dist/payment-core.js';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from '../dist/payment-core.js';
 import { validateProfile } from '../dist/member-store.js';
 import { productInput, categoryInput, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES } from '../dist/catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from '../dist/shipping-csv.js';
@@ -74,8 +74,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const items = await q.all(`SELECT * FROM order_items WHERE order_id IN (${marks(ids)}) ORDER BY order_id, line_no`, ids);
     const events = await q.all(`SELECT * FROM order_events WHERE order_id IN (${marks(ids)}) ORDER BY id`, ids);
     const pos = await q.all(`SELECT * FROM purchase_orders WHERE order_id IN (${marks(ids)}) ORDER BY order_id, seq`, ids);
-    const payments = await q.all(`SELECT order_id, reference, due_on FROM payments WHERE order_id IN (${marks(ids)}) ORDER BY id`, ids);
-    return rows.map(row => ({ row, items: items.filter(i => i.order_id === row.id), events: events.filter(e => e.order_id === row.id), pos: pos.filter(p => p.order_id === row.id), payment: payments.find(p => p.order_id === row.id) }));
+    return rows.map(row => ({ row, items: items.filter(i => i.order_id === row.id), events: events.filter(e => e.order_id === row.id), pos: pos.filter(p => p.order_id === row.id) }));
   }
   const itemFrom = (i, withCost) => ({ id: i.product_id, name: i.name, image: i.image, size: i.size, price: num(i.unit_price), ...(withCost ? { cost: num(i.unit_cost) } : {}), quantity: num(i.quantity), dealerId: i.dealer_id });
   function orderView(o, dealers, admin = false) {
@@ -84,7 +83,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       id: r.id, createdAt: r.created_at, memberId: r.member_id, salonId: r.salon_id, salonName: r.salon_name, seller: r.seller, staffId: r.staff_id, staffName: r.staff_name,
       customer: { name: r.ship_name, address: r.ship_address, postal: r.ship_postal, phone: r.ship_phone || '', email: r.ship_email },
       items: o.items.map(i => itemFrom(i, admin)), subtotal: num(r.subtotal), shipping: num(r.shipping), total: num(r.total), taxTotal: num(r.tax_total),
-      paymentMethod: r.payment_method, paymentFee: num(r.payment_fee), paymentStatus: r.payment_status, paymentReference: o.payment?.reference || '', paymentDueOn: o.payment?.due_on || '',
+      paymentMethod: r.payment_method, paymentStatus: r.payment_status,
       status: r.status, payment: paymentLabel(r.payment_method, r.payment_status), timeline: o.events.map(e => ({ at: e.occurred_at, label: e.label })),
       shipments: o.pos.map(p => ({ id: p.id, dealerId: p.dealer_id, dealerName: dealers.find(d => d.id === p.dealer_id)?.name, status: p.status, carrier: p.carrier, tracking: p.tracking, shippedAt: p.shipped_at || undefined, items: o.items.filter(i => i.purchase_order_id === p.id).map(i => ({ id: i.product_id, name: i.name, quantity: num(i.quantity) })) })),
     };
@@ -166,12 +165,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const saved = input?.addressId != null ? (await addressRow(q, m.id, input.addressId)) || fail('お届け先が見つかりません。', 404) : null;
     const customer = orderCustomer(input, m, saved), pay = paymentInput(input);
     const qt = await quote(q, input), salon = await salonById(q, input.salonId);
-    if (pay.method === 'cod' && new Set(qt.items.map(i => i.dealerId)).size > 1) fail(COD_SPLIT_MESSAGE, 409);
     if (pay.saveCard && num((await q.get('SELECT COUNT(*) AS n FROM member_cards WHERE member_id=?', [m.id])).n) >= MAX_CARDS) fail(`カードは${MAX_CARDS}枚まで登録できます。`, 409);
     const staff = m.staff_id ? salon.staff.find(s => s.id === m.staff_id) : null;
     let id = newOrderId(now);
     while (await q.get('SELECT id FROM orders WHERE id=?', [id])) id = newOrderId(now);
-    const paymentFee = paymentFeeOf(pay.method), total = qt.total + paymentFee, paymentStatus = initialPaymentStatus(pay.method);
     // 在庫は「足りる場合だけ減らす」条件付き更新で確保する（同時注文でも売り越さない）。
     // 商品IDの順に更新し、MySQL で複数商品の同時注文がデッドロックしないようにする。
     for (const item of [...qt.items].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -180,18 +177,14 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'order', ?, ?, ?)", [item.id, -item.quantity, id, actorName(member), now]);
     }
     // カード：登録済みカード・新しいカード（トークン）・トークンなし（テスト決済）のどれか。承認されなければ在庫の確保ごと取り消す
-    let charge = null;
-    if (pay.method === 'card') {
-      const card = pay.cardId ? (await cardRow(q, m.id, pay.cardId)) || fail('登録済みのカードが見つかりません。', 404) : pay.card;
-      charge = testCharge(card?.token || 'tok_test_' + randomBytes(10).toString('hex'), total);
-      if (pay.saveCard) await insertCard(q, m.id, pay.card, now);
-    }
-    const instructions = paymentInstructions(pay.method, id, now);
+    const card = pay.cardId ? (await cardRow(q, m.id, pay.cardId)) || fail('登録済みのカードが見つかりません。', 404) : pay.card;
+    const charge = testCharge(card?.token || 'tok_test_' + randomBytes(10).toString('hex'), qt.total);
+    if (pay.saveCard) await insertCard(q, m.id, pay.card, now);
     await q.run(`INSERT INTO orders (id, request_key, fingerprint, member_id, salon_id, salon_name, seller, staff_id, staff_name, fee_rate, fee, subtotal, shipping, total, tax_total,
-      payment_method, payment_fee, status, payment_status, ship_name, ship_postal, ship_address, ship_phone, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?, ?, ?)`,
-    [id, key, fingerprint, m.id, salon.id, salon.name, salon.owner, staff?.id || '', staff?.name || '指名なし', salon.feeRate, feeOf(qt.subtotal, salon.feeRate), qt.subtotal, qt.shipping, total, includedTax(total),
-      pay.method, paymentFee, paymentStatus, ...[customer.name, customer.postal, customer.address, customer.phone, customer.email].map(c.encrypt), jst(now).slice(0, 10), now, now]);
+      payment_method, status, payment_status, ship_name, ship_postal, ship_address, ship_phone, ship_email, return_reason, stock_restored, is_sample, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'card', 'ordered', 'captured', ?, ?, ?, ?, ?, NULL, 0, 0, ?, ?, ?)`,
+    [id, key, fingerprint, m.id, salon.id, salon.name, salon.owner, staff?.id || '', staff?.name || '指名なし', salon.feeRate, feeOf(qt.subtotal, salon.feeRate), qt.subtotal, qt.shipping, qt.total, includedTax(qt.total),
+      ...[customer.name, customer.postal, customer.address, customer.phone, customer.email].map(c.encrypt), jst(now).slice(0, 10), now, now]);
     const dealers = [...new Set(qt.items.map(i => i.dealerId))];
     for (const [index, dealerId] of dealers.entries()) {
       const items = qt.items.filter(i => i.dealerId === dealerId), shipping = index === 0 ? qt.shipping : 0, poId = purchaseOrderId(id, index);
@@ -200,10 +193,9 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       for (const item of items) await q.run('INSERT INTO order_items (order_id, purchase_order_id, line_no, product_id, sku, name, size, image, unit_price, unit_cost, quantity, tax_rate, dealer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?)',
         [id, poId, qt.items.indexOf(item) + 1, item.id, item.sku, item.name, item.size, item.image, item.price, item.cost, item.quantity, dealerId]);
     }
-    await event(q, id, orderPlacedLabel(pay.method), now);
-    await event(q, id, prepaid(pay.method) ? 'ご入金の確認後に、ディーラーから出荷します' : 'ディーラーへ自動発注しました', now);
-    await q.run('INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, method, reference, due_on, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, charge?.provider || 'test', charge?.id || `test_${id}`, total, paymentStatus, pay.method, instructions.reference, instructions.dueOn, now, now]);
+    await event(q, id, ORDER_PLACED_LABEL, now);
+    await event(q, id, 'ディーラーへ自動発注しました', now);
+    await q.run("INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'captured', ?, ?)", [id, charge.provider, charge.id, qt.total, now, now]);
     await q.run('DELETE FROM cart_items WHERE member_id=?', [m.id]);
     // お届け先：住所録が空なら今回のお届け先を登録する。「保存する」を選んだ場合も追加する（10件まで）
     const book = await q.all('SELECT id FROM member_addresses WHERE member_id=?', [m.id]);
@@ -276,7 +268,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       products: await loadProducts(q, { dealerId: op.role === 'dealer' ? op.dealerId : undefined, withCost: true }),
       salons, dealers,
       orders: views.map(o => orderForRole(op.role, o)),
-      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, paymentMethod: p.payment_method, awaitingPayment: awaitingPayment({ paymentMethod: p.payment_method, paymentStatus: p.payment_status }), customer: customerFor(op.role, { name: o.ship_name, address: o.ship_address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
+      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: o.ship_address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
       categories: op.role === 'admin' ? await categoryList(q) : [], concernNames: await concernList(q),
       profiles: members.map(m => ({ ...profileFrom(m), ref: memberRef(m.id) })),
       customerStats: op.role === 'dealer' ? [] : await customerStats(q, salons, now),
@@ -369,11 +361,11 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     if (route === '/payment-methods' || route.startsWith('/payment-methods/')) {
       if (!actor.member) fail('会員ログインが必要です。', 401);
       const memberId = actor.member.id;
-      const view = async () => ({ defaultMethod: (await q.get('SELECT default_payment_method FROM members WHERE id=?', [memberId]))?.default_payment_method || '', cards: (await q.all('SELECT * FROM member_cards WHERE member_id=? ORDER BY created_at, id', [memberId])).map(r => cardView({ id: r.id, brand: r.brand, last4: r.last4, expMonth: r.exp_month, expYear: r.exp_year, isDefault: bool(r.is_default) })) });
+      const view = async () => ({ cards: sortCards((await q.all('SELECT * FROM member_cards WHERE member_id=?', [memberId])).map(r => ({ id: r.id, brand: r.brand, last4: r.last4, expMonth: r.exp_month, expYear: r.exp_year, isDefault: bool(r.is_default), createdAt: r.created_at }))).map(cardView) });
       if (route === '/payment-methods' && method === 'GET') return view();
       if (route === '/payment-methods' && method === 'PATCH') {
-        if (input?.defaultMethod !== undefined) { if (input.defaultMethod !== '' && !PAYMENT_METHODS[input.defaultMethod]) fail('お支払い方法を確認してください。'); await q.run('UPDATE members SET default_payment_method=?, updated_at=? WHERE id=?', [input.defaultMethod, now, memberId]); }
-        if (input?.defaultCardId) { if (!(await cardRow(q, memberId, input.defaultCardId))) fail('カードが見つかりません。', 404); await q.run('UPDATE member_cards SET is_default=CASE WHEN id=? THEN 1 ELSE 0 END WHERE member_id=?', [input.defaultCardId, memberId]); }
+        if (!input?.defaultCardId || !(await cardRow(q, memberId, input.defaultCardId))) fail('カードが見つかりません。', 404);
+        await q.run('UPDATE member_cards SET is_default=CASE WHEN id=? THEN 1 ELSE 0 END WHERE member_id=?', [input.defaultCardId, memberId]);
         return view();
       }
       if (route === '/payment-methods/cards' && method === 'POST') { await insertCard(q, memberId, cardInput(input?.card, new Date(now)), now, input?.makeDefault === true); return view(); }
@@ -381,7 +373,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (del && method === 'DELETE') {
         const card = await cardRow(q, memberId, del[1]); if (!card) fail('カードが見つかりません。', 404);
         await q.run('DELETE FROM member_cards WHERE id=?', [card.id]);
-        const first = await q.get('SELECT id FROM member_cards WHERE member_id=? ORDER BY created_at, id LIMIT 1', [memberId]);
+        const [first] = sortCards((await q.all('SELECT id, last4, created_at FROM member_cards WHERE member_id=?', [memberId])).map(r => ({ ...r, createdAt: r.created_at })));
         if (bool(card.is_default) && first) await q.run('UPDATE member_cards SET is_default=1 WHERE id=?', [first.id]);
         return view();
       }
@@ -461,19 +453,12 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       const items = () => q.all('SELECT * FROM order_items WHERE purchase_order_id=? ORDER BY line_no', [po.id]);
       if (input?.status === po.status) return poView(po, await items());
       if (PO_TRANSITIONS[po.status] !== input?.status) fail('受付 → 出荷 → 配達完了の順に操作してください。', 409);
-      if (awaitingPayment({ paymentMethod: order.payment_method, paymentStatus: order.payment_status })) fail('お客様のご入金の確認後に受け付けてください。', 409);
       if (input.status === 'shipped') { const { tracking, carrier } = validateTracking(input); await q.run("UPDATE purchase_orders SET status='shipped', tracking=?, carrier=?, shipped_at=?, updated_at=? WHERE id=?", [tracking, carrier, now, now, po.id]); }
       else await q.run(`UPDATE purchase_orders SET status=?, ${input.status === 'delivered' ? 'delivered_at=?, ' : ''}updated_at=? WHERE id=?`, input.status === 'delivered' ? [input.status, now, now, po.id] : [input.status, now, po.id]);
       const all = await q.all('SELECT status FROM purchase_orders WHERE order_id=?', [order.id]), nextStatus = orderStatusFrom(all.map(p => p.status));
       await q.run('UPDATE orders SET status=?, updated_at=? WHERE id=?', [nextStatus, now, order.id]);
       const dealer = await q.get('SELECT short_name FROM dealers WHERE id=?', [po.dealer_id]);
       await event(q, order.id, `${dealer.short_name}：${poStatuses[input.status]}`, now);
-      // 代金引換：配達完了でお支払いを受け取ったことにする
-      if (nextStatus === 'delivered' && order.payment_method === 'cod' && order.payment_status === 'pending') {
-        await q.run("UPDATE orders SET payment_status='captured', updated_at=? WHERE id=?", [now, order.id]);
-        await q.run("UPDATE payments SET status='captured', updated_at=? WHERE order_id=?", [now, order.id]);
-        await event(q, order.id, '代金引換のお支払いを受け取りました', now);
-      }
       await audit(q, op, poStatuses[input.status], po.id, now);
       if (input.status === 'shipped') effects.push({ type: 'shipped', purchaseOrderId: po.id, orderId: order.id, memberId: order.member_id });
       return poView(await q.get('SELECT * FROM purchase_orders WHERE id=?', [po.id]), await items());
@@ -551,20 +536,6 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       await audit(q, op, 'カテゴリを削除', cat.name, now);
       return categoryList(q);
     }
-    // 決済：前払い（銀行振込・コンビニ払い）の入金確認（本番は決済代行からの入金通知で自動化する）
-    const paymentAction = route.match(/^\/admin\/orders\/([^/]+)\/payment$/);
-    if (paymentAction && method === 'POST') {
-      const op = requireOperator(actor, ['admin']), order = await q.get('SELECT * FROM orders WHERE id=?', [paymentAction[1]]);
-      if (!order) fail('注文が見つかりません。', 404);
-      if (!prepaid(order.payment_method)) fail('前払いの注文ではありません。', 409);
-      if (order.payment_status === 'captured') return orderById(q, order.id);
-      if (order.payment_status !== 'pending' || order.status === 'cancelled') fail('この注文の入金は確認できません。', 409);
-      await q.run("UPDATE orders SET payment_status='captured', updated_at=? WHERE id=?", [now, order.id]);
-      await q.run("UPDATE payments SET status='captured', updated_at=? WHERE order_id=?", [now, order.id]);
-      await event(q, order.id, 'ご入金を確認しました。ディーラーから出荷します', now);
-      await audit(q, op, '入金を確認', order.id, now);
-      return orderById(q, order.id);
-    }
     // 会員情報の編集（仕様書 AD-005）：お客様の情報は担当サロンのものなので、編集できるのは担当サロンだけ。メールアドレス（ログインID）は変えない
     const customerEdit = route.match(/^\/admin\/customers\/([^/]+)$/);
     if (customerEdit && method === 'PATCH') {
@@ -580,16 +551,16 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       const { kind, ids } = shippingInput(input), filename = shippingFileName(kind, jst(now).slice(0, 10));
       if (kind === 'purchaseOrders') {
         const op = requireOperator(actor, ['dealer']);
-        const found = await q.all(`SELECT po.*, o.member_id, o.status AS order_status, o.payment_method, o.payment_status, o.total AS order_total, o.ship_name, o.ship_postal, o.ship_address, o.ship_phone, o.ship_email FROM purchase_orders po JOIN orders o ON o.id=po.order_id WHERE po.dealer_id=? AND po.id IN (${marks(ids)})`, [op.dealerId, ...ids]);
+        const found = await q.all(`SELECT po.*, o.member_id, o.status AS order_status, o.ship_name, o.ship_postal, o.ship_address, o.ship_phone, o.ship_email FROM purchase_orders po JOIN orders o ON o.id=po.order_id WHERE po.dealer_id=? AND po.id IN (${marks(ids)})`, [op.dealerId, ...ids]);
         if (found.length !== ids.length) fail('出力できない発注が含まれています。', 403);
         const rows = ids.map(id => found.find(p => p.id === id));
-        if (rows.some(p => !SHIPPABLE.includes(p.status) || ['cancelled', 'returned', 'return_requested'].includes(p.order_status) || awaitingPayment({ paymentMethod: p.payment_method, paymentStatus: p.payment_status }))) fail('出荷前（入金確認済み）の発注だけを選んでください。', 409);
+        if (rows.some(p => !SHIPPABLE.includes(p.status) || ['cancelled', 'returned', 'return_requested'].includes(p.order_status))) fail('出荷前の発注だけを選んでください。', 409);
         const salonIds = [...new Set(rows.map(p => p.salon_id))].sort(), salons = await loadSalons(q, { ids: salonIds });
         // お客様の個人情報を含むので、店舗ごとにアクセス記録を残す
         for (const salonId of salonIds) await recordAccess(q, { actorId: op.id || '', actorName: op.name, role: accessRoles.dealer, salonId, action: accessActions.export, target: accessTargets.shippingCsv, count: new Set(rows.filter(p => p.salon_id === salonId).map(p => p.member_id)).size, ip: actor.ip }, now);
         const items = await q.all(`SELECT purchase_order_id, name, quantity FROM order_items WHERE purchase_order_id IN (${marks(ids)}) ORDER BY line_no`, ids);
         return { filename, columns: SHIPPING_COLUMNS, rows: rows.map(p => { const o = openRow(c, 'orders', p), salon = salons.find(s => s.id === p.salon_id);
-          return shippingRow({ reference: p.id, to: { name: o.ship_name, postal: o.ship_postal, address: o.ship_address, phone: o.ship_phone }, from: { name: salon.name, postal: '', address: salonAddress(salon), phone: salon.phone }, items: items.filter(i => i.purchase_order_id === p.id).map(i => ({ name: i.name, quantity: num(i.quantity) })), codAmount: p.payment_method === 'cod' && p.payment_status === 'pending' ? num(p.order_total) : 0, note: `注文 ${p.order_id}` }); }) };
+          return shippingRow({ reference: p.id, to: { name: o.ship_name, postal: o.ship_postal, address: o.ship_address, phone: o.ship_phone }, from: { name: salon.name, postal: '', address: salonAddress(salon), phone: salon.phone }, items: items.filter(i => i.purchase_order_id === p.id).map(i => ({ name: i.name, quantity: num(i.quantity) })), note: `注文 ${p.order_id}` }); }) };
       }
       requireOperator(actor, ['admin']);
       const found = await supply.loadOrders(q, `id IN (${marks(ids)})`, ids);
@@ -670,10 +641,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     await db.exec('ALTER TABLE member_addresses MODIFY name VARCHAR(512) NOT NULL, MODIFY postal VARCHAR(128) NOT NULL, MODIFY address VARCHAR(1500) NOT NULL');
     await db.exec('ALTER TABLE orders MODIFY ship_name VARCHAR(512) NOT NULL, MODIFY ship_postal VARCHAR(128) NOT NULL, MODIFY ship_address VARCHAR(1500) NOT NULL, MODIFY ship_email VARCHAR(512) NOT NULL, MODIFY return_reason VARCHAR(1700) NULL');
   }
-  // 版5の注文の表：決済方法・代引き手数料・お届け先の電話番号を追加し、支払状態に「入金待ち」「取消」を加える。
+  // 版5の注文の表：支払方法・お届け先の電話番号を追加し、支払状態に「入金待ち」「取消」を加える。
   // SQLite は CHECK 制約を変えられないため、公式の手順（新しい表を作って写し、入れ替える）で作り直す。
   async function upgradeOrdersV5() {
-    if (db.dialect === 'mysql') return db.exec("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(20) NOT NULL DEFAULT 'card' AFTER tax_total, ADD COLUMN payment_fee INT NOT NULL DEFAULT 0 AFTER payment_method, ADD COLUMN ship_phone VARCHAR(256) NOT NULL DEFAULT '' AFTER ship_address");
+    if (db.dialect === 'mysql') return db.exec("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(20) NOT NULL DEFAULT 'card' AFTER tax_total, ADD COLUMN ship_phone VARCHAR(256) NOT NULL DEFAULT '' AFTER ship_address");
     const old = await db.tableColumns('orders');
     await db.exec('PRAGMA foreign_keys=OFF');
     try {
@@ -746,14 +717,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (await db.tableExists('members') && (await db.tableColumns('members')).includes('email') && !(await db.tableColumns('members')).includes('privacy_version')) { await db.exec(`ALTER TABLE members ADD COLUMN privacy_version ${db.dialect === 'mysql' ? 'VARCHAR(20)' : 'TEXT'} NULL`); await db.exec(`ALTER TABLE members ADD COLUMN privacy_agreed_at ${db.dialect === 'mysql' ? 'VARCHAR(30)' : 'TEXT'} NULL`); }
       if (await db.tableExists('operators') && !(await db.tableColumns('operators')).includes('line_id')) await db.exec(db.dialect === 'mysql' ? 'ALTER TABLE operators ADD COLUMN line_id VARCHAR(100) NULL, ADD UNIQUE KEY operators_line_id (line_id)' : 'ALTER TABLE operators ADD COLUMN line_id TEXT');
       if (await db.tableExists('members') && (await db.tableColumns('members')).includes('email') && !(await db.tableColumns('members')).includes('email_index')) await widenForEncryption();
-      // 版5：決済方法・代引き手数料・お届け先の電話番号・既定の支払方法
+      // 版5：支払方法・お届け先の電話番号
       if (await db.tableExists('orders') && (await db.tableColumns('orders')).includes('ship_name') && !(await db.tableColumns('orders')).includes('payment_method')) await upgradeOrdersV5();
       const addColumn = async (table, column, sqliteType, mysqlType) => { if (await db.tableExists(table) && !(await db.tableColumns(table)).includes(column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${db.dialect === 'mysql' ? mysqlType : sqliteType}`); };
       await addColumn('member_addresses', 'phone', "TEXT NOT NULL DEFAULT ''", "VARCHAR(256) NOT NULL DEFAULT '' AFTER address");
-      if (await db.tableExists('members') && (await db.tableColumns('members')).includes('email')) await addColumn('members', 'default_payment_method', "TEXT NOT NULL DEFAULT ''", "VARCHAR(20) NOT NULL DEFAULT ''");
-      await addColumn('payments', 'method', "TEXT NOT NULL DEFAULT 'card'", "VARCHAR(20) NOT NULL DEFAULT 'card'");
-      await addColumn('payments', 'reference', "TEXT NOT NULL DEFAULT ''", "VARCHAR(60) NOT NULL DEFAULT ''");
-      await addColumn('payments', 'due_on', "TEXT NOT NULL DEFAULT ''", "VARCHAR(10) NOT NULL DEFAULT ''");
       await db.migrate();
       if (db.dialect === 'sqlite') await db.exec(APPEND_ONLY_SQLITE);
       if (addedWholesale) for (const p of await db.all('SELECT id, price FROM products')) await db.run('UPDATE products SET wholesale_price=? WHERE id=?', [wholesaleOf(num(p.price)), p.id]);

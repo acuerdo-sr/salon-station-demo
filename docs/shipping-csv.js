@@ -2,7 +2,7 @@
 // 佐川急便の送り状発行システム「e飛伝Ⅲ」に取り込む前提の列構成。列の並びと文字数の上限は、
 // e飛伝Ⅲ の「取込レイアウト登録」で合わせる（住所は既定で1列16文字ずつ、3列に分けて出力する）。
 export const SHIPPING_COLUMNS = ['お客様管理番号', 'お届け先電話番号', 'お届け先郵便番号', 'お届け先住所1', 'お届け先住所2', 'お届け先住所3', 'お届け先名称1', 'お届け先名称2',
-  'ご依頼主電話番号', 'ご依頼主郵便番号', 'ご依頼主住所1', 'ご依頼主住所2', 'ご依頼主名称1', '品名1', '品名2', '品名3', '品名4', '品名5', '出荷個数', '便種', '代引金額', '記事'];
+  'ご依頼主電話番号', 'ご依頼主郵便番号', 'ご依頼主住所1', 'ご依頼主住所2', 'ご依頼主名称1', '品名1', '品名2', '品名3', '品名4', '品名5', '出荷個数', '便種', '記事'];
 export const ADDRESS_FIELD_LENGTH = 16;
 export const SERVICE = '飛脚宅配便';
 
@@ -20,9 +20,9 @@ function itemLines(items) {
   return Array.from({ length: 5 }, (_, i) => i < 4 || lines.length <= 5 ? (lines[i] || '') : `${lines[4]} ほか${lines.length - 5}点`);
 }
 // to / from：{ name, postal, address, phone }
-export function shippingRow({ reference, to, from, items, codAmount = 0, note = '' }) {
+export function shippingRow({ reference, to, from, items, note = '' }) {
   return [reference, phone(to.phone), digits(to.postal), ...splitText(to.address), to.name, '',
-    phone(from.phone), digits(from.postal), ...splitText(from.address, ADDRESS_FIELD_LENGTH, 2), from.name, ...itemLines(items), 1, SERVICE, codAmount || '', note];
+    phone(from.phone), digits(from.postal), ...splitText(from.address, ADDRESS_FIELD_LENGTH, 2), from.name, ...itemLines(items), 1, SERVICE, note];
 }
 export const shippingFileName = (kind, today) => `出荷指示_${kind === 'supplyOrders' ? '加盟店発注' : 'EC注文'}_${today.replaceAll('-', '')}.csv`;
 // 出荷前（受付待ち・出荷準備中）のものだけを出力する

@@ -1,36 +1,23 @@
-// 決済方法（仕様書 2.1.3「多彩な決済方法」「支払方法管理」）。ブラウザ版・DB版・画面で共有する。
-// 本番は決済代行会社と契約し、カード番号は決済代行のカード入力欄（トークン化）で扱う。このシステムはカード番号を受け取らず、
-// トークンとブランド・下4桁・有効期限だけを保存する。ここでは決済代行の「テスト環境」を模した動きで、実際の請求は行わない。
-export const PAYMENT_METHODS = { card: 'クレジットカード', cod: '代金引換', bank: '銀行振込（前払い）', konbini: 'コンビニ払い（前払い）' };
-export const COD_FEE = 330;
-export const PAYMENT_DUE_DAYS = { bank: 7, konbini: 3 };
+// お支払い（仕様書 2.1.3「決済方法」「支払方法管理」）。お支払いはクレジットカードのみ。ブラウザ版・DB版・画面で共有する。
+// 本番は決済代行会社と契約し、カード番号は決済代行のカード入力欄（トークン化）で扱う。EMV 3-Dセキュア（本人認証）も決済代行の機能を使う。
+// このシステムはカード番号を受け取らず、トークンとブランド・下4桁・有効期限だけを保存する。
+// ここでは決済代行の「テスト環境」を模した動きで、実際の請求は行わない。
+export const PAYMENT_METHODS = { card: 'クレジットカード' };
 export const MAX_CARDS = 5;
-// 支払状態：pending（入金待ち・代引きは配達時）、captured（決済完了）、refunded（返金済み）、voided（取消）
+// 支払状態：captured（決済完了）、refunded（返金済み）。pending・voided は以前の版の注文の表示用
 export const paymentStatusNames = { pending: '入金待ち', captured: '決済完了', refunded: '返金済み', voided: '取消' };
 export const cardBrands = { visa: 'Visa', mastercard: 'Mastercard', jcb: 'JCB', amex: 'American Express' };
-// 振込先（架空）。本番は決済代行のバーチャル口座、または本部の口座に置き換える。
-export const BANK_ACCOUNT = 'デモ銀行 本店 普通 0000000 サロンステーション（架空）';
+export const ORDER_PLACED_LABEL = 'ご注文・カード決済完了（テスト）';
 
 const fail = (message, status = 400) => { const e = new Error(message); e.status = status; throw e; };
-export const paymentFeeOf = method => method === 'cod' ? COD_FEE : 0;
-export const initialPaymentStatus = method => method === 'card' ? 'captured' : 'pending';
-// 入金を確認するまで出荷しない決済方法（前払い）
-export const prepaid = method => method === 'bank' || method === 'konbini';
-export const orderPlacedLabel = method => ({ card: 'ご注文・カード決済完了（テスト）', cod: 'ご注文を受け付けました（代金引換）', bank: 'ご注文を受け付けました（銀行振込のご入金待ち）', konbini: 'ご注文を受け付けました（コンビニ払いのご入金待ち）' }[method]);
-export const COD_SPLIT_MESSAGE = '代金引換は、1か所から発送するご注文でご利用いただけます。ほかのお支払い方法をお選びください。';
-// キャンセル・返品のときの支払状態：決済済みなら返金、未入金なら取消
+export const paymentLabel = (method, status) => `${PAYMENT_METHODS[method] || PAYMENT_METHODS.card}・${paymentStatusNames[status] || status}`;
+// キャンセル・返品のときの支払状態：決済済みなら返金、未決済（以前の版の注文）なら取消
 export const paymentAfterCancel = status => status === 'captured' ? 'refunded' : 'voided';
-export function paymentLabel(method, status) {
-  const name = PAYMENT_METHODS[method] || PAYMENT_METHODS.card;
-  if (method === 'cod' && status === 'pending') return `${name}（お届け時にお支払い）`;
-  return `${name}・${paymentStatusNames[status] || status}`;
-}
 
-// 注文時の支払方法。card は登録済みカード（cardId）か、新しいカードのトークン（card.token）を使う。
+// 注文時のお支払い：登録済みカード（cardId）か、新しいカードのトークン（card.token）を使う
 export function paymentInput(input) {
   const p = input?.payment ?? { method: 'card' };
-  if (!PAYMENT_METHODS[p?.method]) fail('お支払い方法を選んでください。');
-  if (p.method !== 'card') return { method: p.method };
+  if (p?.method !== 'card') fail('お支払いはクレジットカードのみです。');
   if (typeof p.cardId === 'string' && p.cardId) return { method: 'card', cardId: p.cardId };
   if (p.card) return { method: 'card', card: cardInput(p.card), saveCard: p.saveCard === true };
   // 登録カードもトークンもない場合は、決済代行のテスト決済として扱う（デモ・テスト用）
@@ -51,13 +38,6 @@ export function testCharge(token, amount) {
   if (String(token).includes('_decline_')) fail('カードが承認されませんでした。別のカードをお使いください。', 402);
   if (!Number.isInteger(amount) || amount <= 0) fail('お支払い金額を確認してください。');
   return { provider: 'test', id: 'test_ch_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20) };
-}
-// 前払い（銀行振込・コンビニ払い）のお支払い番号と期限（日本時間の日付）
-export function paymentInstructions(method, orderId, now) {
-  if (!prepaid(method)) return { reference: '', dueOn: '' };
-  const due = new Date(Date.parse(now) + 9 * 3600000 + PAYMENT_DUE_DAYS[method] * 86400000).toISOString().slice(0, 10);
-  const reference = method === 'konbini' ? 'KB' + String(Math.floor(Math.random() * 1e10)).padStart(10, '0') : orderId.replace(/[^0-9A-Z]/g, '').slice(-8);
-  return { reference, dueOn: due };
 }
 
 // ---- 画面側：決済代行のカード入力欄（トークン化）の代わり。公開されているテスト用カード番号だけを受け付け、番号はサーバーに送らない

@@ -1,6 +1,6 @@
 // Shared business rules for the local server and the browser-only public demo.
 import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js';
-import { paymentInput, paymentFeeOf, initialPaymentStatus, prepaid, paymentLabel, testCharge, paymentInstructions, cardInput, orderPlacedLabel, paymentAfterCancel, COD_SPLIT_MESSAGE, PAYMENT_METHODS, MAX_CARDS } from './payment-core.js';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js';
 import { validateProfile } from './member-store.js';
 import { productInput, categoryInput, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES } from './catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js';
@@ -86,16 +86,16 @@ export function migrate(state,catalog){
   for(const p of state.products||[])if(p.wholesalePrice===undefined){p.wholesalePrice=wholesaleOf(p.price);changed=true;}
   for(const k of ['supplyOrders','supplySubscriptions','invoices','accessLogs'])if(!Array.isArray(state[k])){state[k]=[];changed=true;}
   // 住所録・登録カード・既定の支払方法・カテゴリ（版5）。以前の注文はテスト決済（カード）として扱う
-  for(const k of ['addresses','cards','paymentPrefs'])if(!state[k]||typeof state[k]!=='object'||Array.isArray(state[k])){state[k]={};changed=true;}
+  for(const k of ['addresses','cards'])if(!state[k]||typeof state[k]!=='object'||Array.isArray(state[k])){state[k]={};changed=true;}
   if(!Array.isArray(state.categories)){state.categories=seedCategories(state.products||[]);changed=true;}
-  for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';o.paymentFee=0;delete o.payment;changed=true;}
+  for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';delete o.payment;changed=true;}
   return changed;
 }
 
 export const seedDealers=()=>[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}];
 export function createPlatform(catalog,now=new Date().toISOString()){
   const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
-    salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[],accessLogs:[],addresses:{},cards:{},paymentPrefs:{}};
+    salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[],accessLogs:[],addresses:{},cards:{}};
   state.categories=seedCategories(state.products);
   // Clearly fictional examples make the management screens useful on first visit.
   for(let i=0;i<8;i++){
@@ -139,9 +139,10 @@ export function addressInput(input){const a={name:required(input?.name,80),posta
 export function orderCustomer(input,member,saved){const a=saved||addressInput(input?.customer);return {name:a.name,postal:a.postal,address:a.address,phone:a.phone||member.phone||'',email:member.email};}
 export const sortAddresses=list=>[...list].sort((a,b)=>Number(Boolean(b.isDefault))-Number(Boolean(a.isDefault))||String(b.updatedAt).localeCompare(String(a.updatedAt))||String(a.id).localeCompare(String(b.id)));
 export const addressView=a=>({id:String(a.id),name:a.name,postal:a.postal,address:a.address,phone:a.phone||'',isDefault:Boolean(a.isDefault),updatedAt:a.updatedAt});
+// 登録カードの並び：登録した順（同じ時刻なら下4桁の順）。ブラウザ版と DB版で同じ並びにする
+export const sortCards=list=>[...list].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||String(a.last4).localeCompare(String(b.last4))||String(a.id).localeCompare(String(b.id)));
 export const cardView=c=>({id:c.id,brand:c.brand,last4:c.last4,expMonth:Number(c.expMonth),expYear:Number(c.expYear),isDefault:Boolean(c.isDefault)});
-// 前払い（銀行振込・コンビニ払い）で入金待ちの注文は、ディーラーが受け付けられない
-export const awaitingPayment=order=>prepaid(order.paymentMethod)&&order.paymentStatus==='pending';
+
 export const newOrderId=now=>'SS-'+now.slice(2,10).replaceAll('-','')+'-'+crypto.randomUUID().slice(0,5).toUpperCase();
 export const purchaseOrderId=(orderId,index)=>'PO-'+orderId.slice(3)+'-'+(index+1);
 export const feeOf=(subtotal,feeRate)=>Math.round(subtotal*feeRate/100);
@@ -168,13 +169,12 @@ function placeOrder(state,input,actor,now,effects=[]){
   const book=addressBook(state,member.id),saved=input?.addressId!=null?book.find(a=>a.id===String(input.addressId))||fail('お届け先が見つかりません。',404):null;
   const customer=orderCustomer(input,member,saved),pay=paymentInput(input);
   const q=quote(state,input),salon=salonFor(state,input.salonId),staff=salon.staff.find(s=>s.id===profile.staffId);
-  if(pay.method==='cod'&&new Set(q.items.map(p=>p.dealerId)).size>1)fail(COD_SPLIT_MESSAGE,409);
   if(pay.saveCard&&cardList(state,member.id).length>=MAX_CARDS)fail(`カードは${MAX_CARDS}枚まで登録できます。`,409);
-  const id=newOrderId(now),paymentFee=paymentFeeOf(pay.method),total=q.total+paymentFee;
-  // カード：登録済みカード・新しいカード（トークン）・トークンなし（テスト決済）のどれか。承認されなければ注文は作らない
-  if(pay.method==='card'){const card=pay.cardId?cardList(state,member.id).find(c=>c.id===pay.cardId)||fail('登録済みのカードが見つかりません。',404):pay.card;testCharge(card?.token||'tok_test_'+crypto.randomUUID().replace(/-/g,'').slice(0,20),total);if(pay.saveCard)saveCard(state,member.id,pay.card,now);}
-  const {reference,dueOn}=paymentInstructions(pay.method,id,now);
-  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,total,paymentMethod:pay.method,paymentFee,paymentStatus:initialPaymentStatus(pay.method),paymentReference:reference,paymentDueOn:dueOn,status:'ordered',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:orderPlacedLabel(pay.method)},{at:now,label:prepaid(pay.method)?'ご入金の確認後に、ディーラーから出荷します':'ディーラーへ自動発注しました'}]};
+  const id=newOrderId(now);
+  // カード決済：登録済みカード・新しいカード（トークン）・トークンなし（テスト決済）のどれか。承認されなければ注文は作らない
+  const card=pay.cardId?cardList(state,member.id).find(c=>c.id===pay.cardId)||fail('登録済みのカードが見つかりません。',404):pay.card;
+  testCharge(card?.token||'tok_test_'+crypto.randomUUID().replace(/-/g,'').slice(0,20),q.total);if(pay.saveCard)saveCard(state,member.id,pay.card,now);
+  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,paymentMethod:'card',paymentStatus:'captured',status:'ordered',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:ORDER_PLACED_LABEL},{at:now,label:'ディーラーへ自動発注しました'}]};
   state.orders.unshift(order);
   // お届け先：住所録が空なら今回のお届け先を登録する。「保存する」を選んだ場合も追加する（10件まで）
   if(!saved&&(!book.length||input?.saveAddress===true)&&book.length<MAX_ADDRESSES){if(!book.length||input?.saveAsDefault===true)book.forEach(a=>{a.isDefault=false;});book.push({id:'ad-'+crypto.randomUUID().slice(0,8),name:customer.name,postal:customer.postal,address:customer.address,phone:customer.phone,isDefault:!book.length||input?.saveAsDefault===true,updatedAt:now});}
@@ -213,15 +213,15 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(method==='PATCH'){Object.assign(a,addressInput({...a,...input}),{updatedAt:now});if(input?.isDefault===true){book.forEach(x=>{x.isDefault=false;});a.isDefault=true;}return list();}
     if(method==='DELETE'){book.splice(book.indexOf(a),1);if(a.isDefault&&book.length)sortAddresses(book)[0].isDefault=true;return list();}
   }
-  // 支払方法管理（仕様書 2.1.3）：いつもの支払方法と、登録カード（トークンと下4桁だけ）
+  // 支払方法管理（仕様書 2.1.3）：登録カード（トークンと下4桁だけ）と、いつものカード
   if(route==='/payment-methods'||route.startsWith('/payment-methods/')){
     if(!actor.member)fail('会員ログインが必要です。',401);
-    state.paymentPrefs??={};const id=actor.member.id,cards=cardList(state,id),view=()=>({defaultMethod:state.paymentPrefs[id]||'',cards:cards.map(cardView)});
+    const id=actor.member.id,cards=cardList(state,id),view=()=>({cards:sortCards(cards).map(cardView)});
     if(route==='/payment-methods'&&method==='GET')return view();
-    if(route==='/payment-methods'&&method==='PATCH'){if(input?.defaultMethod!==undefined){if(input.defaultMethod!==''&&!PAYMENT_METHODS[input.defaultMethod])fail('お支払い方法を確認してください。');state.paymentPrefs[id]=input.defaultMethod;}if(input?.defaultCardId){const card=cards.find(c=>c.id===input.defaultCardId)||fail('カードが見つかりません。',404);cards.forEach(c=>{c.isDefault=c===card;});}return view();}
+    if(route==='/payment-methods'&&method==='PATCH'){const card=cards.find(c=>c.id===input?.defaultCardId)||fail('カードが見つかりません。',404);cards.forEach(c=>{c.isDefault=c===card;});return view();}
     if(route==='/payment-methods/cards'&&method==='POST'){saveCard(state,id,cardInput(input?.card,new Date(now)),now,input?.makeDefault===true);return view();}
     const del=route.match(/^\/payment-methods\/cards\/([^/]+)$/);
-    if(del&&method==='DELETE'){const i=cards.findIndex(c=>c.id===del[1]);if(i<0)fail('カードが見つかりません。',404);const [removed]=cards.splice(i,1);if(removed.isDefault&&cards[0])cards[0].isDefault=true;return view();}
+    if(del&&method==='DELETE'){const i=cards.findIndex(c=>c.id===del[1]);if(i<0)fail('カードが見つかりません。',404);const [removed]=cards.splice(i,1);if(removed.isDefault&&cards.length)sortCards(cards)[0].isDefault=true;return view();}
   }
   if(route==='/profile'&&method==='PATCH'){
     if(!actor.member)fail('会員ログインが必要です。',401);const salon=salonFor(state,input?.salonId);
@@ -272,7 +272,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     return {operator:clone(op),revision:state.revision,products:clone(state.products.filter(p=>op.role!=='dealer'||p.dealerId===op.dealerId)),salons:clone(state.salons.filter(s=>op.role==='admin'||op.role==='salon'&&s.id===op.salonId||op.role==='dealer'&&pos.some(p=>p.salonId===s.id))),dealers:clone(state.dealers.filter(d=>op.role!=='dealer'||d.id===op.dealerId)),
       // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（privacy.js）
       orders:orders.map(o=>orderForRole(op.role,{...customerOrder(state,o),fee:o.fee,items:clone(o.items)})),
-      purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,paymentMethod:o.paymentMethod,awaitingPayment:awaitingPayment(o),customer:customerFor(op.role,clone(o.customer),o.memberId)};}),categories:op.role==='admin'?categoryList(state):[],concernNames:CONCERN_NAMES,
+      purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:customerFor(op.role,clone(o.customer),o.memberId)};}),categories:op.role==='admin'?categoryList(state):[],concernNames:CONCERN_NAMES,
       profiles:clone(members).map(p=>({...p,ref:memberRef(p.id)})),accessLogs:state.accessLogs.filter(row=>accessLogVisible(op,row)).slice(0,ACCESS_LOG_LIMIT).map(row=>accessLogView(op,clone(row))),
       customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
   }
@@ -282,11 +282,8 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const order=state.orders.find(o=>o.id===po.orderId);if(['return_requested','returned','cancelled'].includes(order.status))fail('この注文の出荷状態は変更できません。',409);
     if(input?.status===po.status)return clone(po);
     if(PO_TRANSITIONS[po.status]!==input?.status)fail('受付 → 出荷 → 配達完了の順に操作してください。',409);
-    if(awaitingPayment(order))fail('お客様のご入金の確認後に受け付けてください。',409);
     if(input.status==='shipped'){const {tracking,carrier}=validateTracking(input);po.tracking=tracking;po.carrier=carrier;po.shippedAt=now;}
     po.status=input.status;if(po.status==='shipped')effects.push({type:'shipped',purchaseOrderId:po.id,orderId:order.id,memberId:order.memberId});refreshOrder(state,order);order.timeline.push({at:now,label:`${state.dealers.find(d=>d.id===po.dealerId).short}：${poStatuses[po.status]}`});
-    // 代金引換：配達完了でお支払いを受け取ったことにする
-    if(order.status==='delivered'&&order.paymentMethod==='cod'&&order.paymentStatus==='pending'){order.paymentStatus='captured';order.timeline.push({at:now,label:'代金引換のお支払いを受け取りました'});}
     log(state,op,poStatuses[po.status],po.id,now);return clone(po);
   }
   const returnAction=route.match(/^\/admin\/orders\/([^/]+)\/refund$/);
@@ -324,15 +321,6 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     }
     if(method==='DELETE'){if(state.products.some(p=>p.category===c.name))fail('商品が登録されているカテゴリは削除できません。商品のカテゴリを変えてから削除してください。',409);state.categories=state.categories.filter(x=>x!==c);log(state,op,'カテゴリを削除',c.name,now);return categoryList(state);}
   }
-  // 決済：前払い（銀行振込・コンビニ払い）の入金確認（本番は決済代行からの入金通知で自動化する）
-  const paymentAction=route.match(/^\/admin\/orders\/([^/]+)\/payment$/);
-  if(paymentAction&&method==='POST'){
-    const op=requireOperator(actor,['admin']),order=state.orders.find(o=>o.id===paymentAction[1]);if(!order)fail('注文が見つかりません。',404);
-    if(!prepaid(order.paymentMethod))fail('前払いの注文ではありません。',409);
-    if(order.paymentStatus==='captured')return customerOrder(state,order);
-    if(order.paymentStatus!=='pending'||order.status==='cancelled')fail('この注文の入金は確認できません。',409);
-    order.paymentStatus='captured';order.timeline.push({at:now,label:'ご入金を確認しました。ディーラーから出荷します'});log(state,op,'入金を確認',order.id,now);return customerOrder(state,order);
-  }
   // 会員情報の編集（仕様書 AD-005）：お客様の情報は担当サロンのものなので、編集できるのは担当サロンだけ。メールアドレス（ログインID）は変えない
   const customerEdit=route.match(/^\/admin\/customers\/([^/]+)$/);
   if(customerEdit&&method==='PATCH'){
@@ -344,10 +332,10 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const {kind,ids}=shippingInput(input),filename=shippingFileName(kind,jst(now).slice(0,10));
     if(kind==='purchaseOrders'){
       const op=requireOperator(actor,['dealer']);
-      const rows=ids.map(id=>{const po=state.purchaseOrders.find(p=>p.id===id&&p.dealerId===op.dealerId);if(!po)fail('出力できない発注が含まれています。',403);const order=state.orders.find(o=>o.id===po.orderId);if(!SHIPPABLE.includes(po.status)||['cancelled','returned','return_requested'].includes(order.status)||awaitingPayment(order))fail('出荷前（入金確認済み）の発注だけを選んでください。',409);return {po,order,salon:salonFor(state,po.salonId)};});
+      const rows=ids.map(id=>{const po=state.purchaseOrders.find(p=>p.id===id&&p.dealerId===op.dealerId);if(!po)fail('出力できない発注が含まれています。',403);const order=state.orders.find(o=>o.id===po.orderId);if(!SHIPPABLE.includes(po.status)||['cancelled','returned','return_requested'].includes(order.status))fail('出荷前の発注だけを選んでください。',409);return {po,order,salon:salonFor(state,po.salonId)};});
       // お客様の個人情報を含むので、店舗ごとにアクセス記録を残す
       for(const salonId of [...new Set(rows.map(r=>r.po.salonId))].sort())recordAccess(state,{actorId:op.id||'',actorName:op.name,role:accessRoles.dealer,salonId,action:accessActions.export,target:accessTargets.shippingCsv,count:new Set(rows.filter(r=>r.po.salonId===salonId).map(r=>r.order.memberId)).size,ip:actor.ip},now);
-      return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(({po,order,salon})=>shippingRow({reference:po.id,to:order.customer,from:{name:salon.name,postal:'',address:salonAddress(salon),phone:salon.phone},items:po.items,codAmount:order.paymentMethod==='cod'&&order.paymentStatus==='pending'?order.total:0,note:`注文 ${order.id}`}))};
+      return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(({po,order,salon})=>shippingRow({reference:po.id,to:order.customer,from:{name:salon.name,postal:'',address:salonAddress(salon),phone:salon.phone},items:po.items,note:`注文 ${order.id}`}))};
     }
     requireOperator(actor,['admin']);
     const rows=ids.map(id=>{const o=state.supplyOrders.find(x=>x.id===id);if(!o)fail('発注が見つかりません。',404);if(!SUPPLY_SHIPPABLE.includes(o.status))fail('出荷前の発注だけを選んでください。',409);return o;});
