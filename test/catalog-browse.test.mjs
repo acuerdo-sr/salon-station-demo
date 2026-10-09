@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { products, concernCategories } from '../catalog.mjs';
 import { createPlatform, migrate, platformRequest } from '../dist/platform-core.js';
 import { CATALOG_VERSION } from '../dist/catalog-core.js';
-import { brandInfo } from '../dist/brands.js';
+import { brandInfo, FEATURES } from '../dist/brands.js';
 
 test('the sample catalogue covers several categories and brands; every illustration exists and every brand has an introduction', () => {
   assert.ok(products.length >= 30);
@@ -18,6 +18,9 @@ test('the sample catalogue covers several categories and brands; every illustrat
     assert.ok(brandInfo(p.brand).lead, p.brand);
   }
   assert.ok(products.some(p => !p.stock), '入荷待ちの表示を確かめる商品がある');
+  for (const name of new Set(products.map(p => p.brand))) for (const key of ['image', 'hero']) assert.ok(existsSync(new URL(`../dist/assets/${brandInfo(name)[key]}`, import.meta.url)), `ブランドの絵（${key}）：${name}`);
+  assert.ok(FEATURES.length >= 1 && FEATURES.length <= 3, 'おすすめは3つまで');
+  for (const f of FEATURES) { assert.ok(products.some(p => p.id === f.product), f.product); assert.ok(existsSync(new URL(`../dist/assets/${f.image}`, import.meta.url)), f.image); }
 });
 
 test('older browser data gains the new sample products and categories once, without touching edited products', () => {

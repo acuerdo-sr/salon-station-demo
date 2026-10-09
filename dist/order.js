@@ -4,7 +4,7 @@
 import { platform, isPages } from './platform-client.js';
 import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js';
 import { DEMO_OPERATOR_PASSWORD } from './platform-core.js';
-import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl } from './ui-kit.js';
+import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js';
 import { lineConfig, liffIdToken } from './line-login.js';
 import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js';
 
@@ -58,7 +58,7 @@ function loginView(message = '') {
 
 // ---- ログイン後
 function shell() {
-  const t = cartTotal(), cats = [...new Set(ws.products.map(p => p.category))];
+  const tabScroll = $('.b2b-tabs')?.scrollLeft || 0, t = cartTotal(), cats = [...new Set(ws.products.map(p => p.category))];
   $('#app').innerHTML = `<div class="b2b-topbar">11,000円（税込）以上で送料無料 ／ 平日15時までのご注文は当日出荷（デモ設定） ／ 月末締め・請求書払い</div>
     <header class="b2b-header"><div class="b2b-head-main"><button class="b2b-logo" data-page="home">SALON STATION<small>加盟店 仕入れ</small></button>
       <nav class="b2b-links" aria-label="主なメニュー"><button data-page="products">商品一覧</button><button data-page="history">発注履歴</button><button data-page="invoices">請求書</button></nav>
@@ -68,6 +68,7 @@ function shell() {
     <nav class="b2b-tabs" aria-label="仕入れメニュー">${PAGES.map(([id, label]) => `<button class="${page === id ? 'active' : ''}" data-page="${id}">${label}</button>`).join('')}</nav>
     <main class="b2b-main">${page === 'home' ? homePage() : page === 'products' ? productsPage() : page === 'ec' ? ecTab() : page === 'history' ? historyTab() : page === 'subscriptions' ? subscriptionsTab() : page === 'staff' ? staffTab() : invoicesTab()}</main>
     ${t.count ? `<div class="order-cartbar"><div><small>${t.count}点${t.shipping ? ` / 送料 ${money(t.shipping)}` : ' / 送料無料'}・出荷予定 ${esc(shipEstimate(1).label)}</small><strong>${money(t.total)}</strong></div><button class="btn primary" data-review>発注内容を確認 ${icon('arrow')}</button></div>` : ''}`;
+  keepTabVisible($('.b2b-tabs'), tabScroll);
 }
 function homePage() {
   const last = activeOrders()[0], fav = favorites(), usual = fav.length ? fav : frequentProducts().slice(0, 6), recent = recentProducts(), moving = movingOrders(), news = newProducts(), month = monthSummary();
