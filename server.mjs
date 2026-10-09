@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, statSync, createReadStream } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { products, concernCategories } from './catalog.mjs';
@@ -146,8 +146,20 @@ const server = http.createServer(async (req, res) => {
   const staticRoot = path.join(root,'dist');
   const file = path.resolve(staticRoot, '.' + relative);
   if (!file.startsWith(staticRoot + path.sep)) return json(res,403,{error:'Forbidden'});
-  const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml'};
-  try { const body=readFileSync(file); res.writeHead(200, {'Content-Type':mime[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); res.end(req.method==='HEAD'?undefined:body); }
+  const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.mp4':'video/mp4','.woff2':'font/woff2','.txt':'text/plain; charset=utf-8'};
+  let stat;
+  try { stat=statSync(file); if(!stat.isFile()) throw Error('not a file'); } catch { return json(res,404,{error:'ページが見つかりません。'}); }
+  const type=mime[path.extname(file)]||'application/octet-stream';
+  // 動画は Safari などが範囲指定（Range）で読み込むため、その部分だけを返す
+  const range=/^bytes=(\d*)-(\d*)$/.exec(req.headers.range||'');
+  if (range && (range[1] || range[2])) {
+   const size=stat.size, start=range[1]?Number(range[1]):Math.max(0,size-Number(range[2])), end=range[1]&&range[2]?Math.min(Number(range[2]),size-1):size-1;
+   if (start>=size||start>end) { res.writeHead(416,{'Content-Range':`bytes */${size}`}); return res.end(); }
+   res.writeHead(206,{'Content-Type':type,'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'no-cache'});
+   if (req.method==='HEAD') return res.end();
+   return createReadStream(file,{start,end}).on('error',()=>res.destroy()).pipe(res);
+  }
+  try { const body=readFileSync(file); res.writeHead(200, {'Content-Type':type,'Content-Length':body.length,'Accept-Ranges':'bytes','Cache-Control':'no-cache'}); res.end(req.method==='HEAD'?undefined:body); }
   catch { json(res,404,{error:'ページが見つかりません。'}); }
  } catch(e) { console.error(e.message); if(!res.headersSent) json(res,e.status||500,{error:e.status?e.message:'処理に失敗しました。もう一度お試しください。'}); }
 });

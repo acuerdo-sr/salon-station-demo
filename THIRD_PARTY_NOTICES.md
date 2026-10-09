@@ -24,3 +24,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## ストアのトップの映像（`dist/assets/salon-film.mp4`）
+
+Mixkit「Bride getting her makeup and hair done」（作者：Ruben Velasco、720p 版）。
+Source: https://mixkit.co/free-stock-video/bride-getting-her-makeup-and-hair-done-40592/
+
+Mixkit Stock Video Free License（https://mixkit.co/license/#videoFree）により、商用・非商用で無料で利用できます。クレジットは必須ではありませんが、ストアのページ下部に「映像：Mixkit（Ruben Velasco）」と表示しています。Mixkit の利用規約（https://mixkit.co/terms/）により、映像そのものを素材として再配布・販売することはできません。
+
+## Outfit（書体。`dist/assets/outfit-latin-wght.woff2`）
+
+ストアの英字の飾り（小見出しなど）に使用。Fontsource の可変フォント版（ラテン文字のみ）。
+Source: https://github.com/Outfitio/Outfit-Fonts / https://fontsource.org/fonts/outfit
+
+Copyright 2021 The Outfit Project Authors。SIL Open Font License 1.1 で配布されています。ライセンス全文は `dist/assets/OUTFIT-LICENSE.txt` にあります。

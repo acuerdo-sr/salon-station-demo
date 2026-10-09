@@ -104,6 +104,20 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
       assert.equal((await fetch(base + '/app.js')).status, 404);
       assert.equal((await fetch(base + '/%E0%A4')).status, 400);
       assert.equal((await fetch(base + '/..%2fserver.mjs')).status, 403);
+      assert.equal((await fetch(base + '/assets')).status, 404, 'フォルダは配信しない');
+    });
+    await t.test('top film and font: served with their types; the video answers byte ranges (Safari plays video this way)', async () => {
+      const whole = await fetch(base + '/assets/salon-film.mp4', { method: 'HEAD' });
+      assert.equal(whole.status, 200); assert.equal(whole.headers.get('content-type'), 'video/mp4'); assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+      const size = Number(whole.headers.get('content-length')); assert.ok(size > 1000000);
+      const head = await fetch(base + '/assets/salon-film.mp4', { headers: { Range: 'bytes=0-99' } });
+      assert.equal(head.status, 206); assert.equal(head.headers.get('content-range'), `bytes 0-99/${size}`);
+      const bytes = new Uint8Array(await head.arrayBuffer()); assert.equal(bytes.length, 100); assert.equal(new TextDecoder().decode(bytes.slice(4, 8)), 'ftyp');
+      const tail = await fetch(base + '/assets/salon-film.mp4', { headers: { Range: 'bytes=-10' } });
+      assert.equal(tail.status, 206); assert.equal((await tail.arrayBuffer()).byteLength, 10); assert.equal(tail.headers.get('content-range'), `bytes ${size - 10}-${size - 1}/${size}`);
+      assert.equal((await fetch(base + '/assets/salon-film.mp4', { headers: { Range: `bytes=${size}-` } })).status, 416);
+      const font = await fetch(base + '/assets/outfit-latin-wght.woff2'); assert.equal(font.status, 200); assert.equal(font.headers.get('content-type'), 'font/woff2');
+      assert.match(await (await fetch(base + '/platform.css')).text(), /outfit-latin-wght\.woff2/);
     });
     await stop(child); child = await start(dir);
     await t.test('members, sessions and orders survive a restart', async () => {

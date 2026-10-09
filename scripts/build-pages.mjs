@@ -15,7 +15,7 @@ await writeFile(path.join(output,page),html);
 }
 await writeFile(path.join(output, 'catalog.json'), JSON.stringify(products, null, 2) + '\n');
 await writeFile(path.join(output, '.nojekyll'), '');
-for (const name of ['shampoo.png', 'treatment.png', 'oil.png']) await copyFile(path.join(root, 'dist', 'assets', name), path.join(output, 'assets', name));
+for (const name of ['shampoo.png', 'treatment.png', 'oil.png', 'salon-film.mp4', 'outfit-latin-wght.woff2', 'OUTFIT-LICENSE.txt']) await copyFile(path.join(root, 'dist', 'assets', name), path.join(output, 'assets', name));
 const allowed = ['index.html','shop.html','admin.html','order.html',...scripts,'catalog.json','assets','.nojekyll'];
 const extra = (await readdir(output)).filter(name => !allowed.includes(name));
 if (extra.length) throw Error('Unexpected files in Pages output: ' + extra.join(', '));
