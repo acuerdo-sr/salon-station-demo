@@ -45,7 +45,7 @@ export function productInput(input, { categories, dealers, concernNames }) {
   if (typeof input?.enabled !== 'boolean') fail('公開設定を確認してください。');
   return {
     brand: text(input?.brand, 100, 'ブランド名', true), name: text(input?.name, 100, '商品名', true), categoryId: category.id, category: category.name, concerns,
-    size: text(input?.size, 40, '容量・サイズ'), description: text(input?.description, 1000, '商品説明'), tag: text(input?.tag, 20, 'ラベル'),
+    size: text(input?.size, 40, '容量・サイズ'), summary: text(input?.summary, 60, '一覧の説明'), description: text(input?.description, 1000, '商品説明'), tag: text(input?.tag, 20, 'ラベル'),
     price, cost, wholesalePrice, dealerId: dealer.id, stock: int(input?.stock, 0, 99999, '在庫数'), enabled: input.enabled,
   };
 }
@@ -83,7 +83,9 @@ export function applyPriceRow(row, current) {
 export const CONCERN_NAMES = ['ダメージヘア対策', 'エイジングケア', '白髪対策', 'ボリュームアップ', '頭皮ケア', 'カラーケア', 'パーマケア'];
 export const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil', ヘアマスク: 'hair-mask', 'ヘアミルク・ミスト': 'hair-milk-mist', スカルプケア: 'scalp-care', ヘアスタイリング: 'hair-styling' };
 // 初期の品ぞろえの版。2：ダミー商品を30点（7カテゴリ・7ブランド）に増やした
-export const CATALOG_VERSION = 2;
+export const CATALOG_VERSION = 3;
+// 版3で作り直した初期商品の写真。以前の既定の写真のままの商品だけ、新しい写真に替える（管理画面で替えた写真はそのまま）
+export const legacyImages = id => [`products/${id}.svg`, 'shampoo.png', 'treatment.png', 'oil.png'];
 export const seedCategories = products => [...new Set(products.map(p => p.category))].map((name, i) => ({ id: CATEGORY_IDS[name] || `category-${i + 1}`, name, sortOrder: i }));
 export const newProductId = () => 'p-' + crypto.randomUUID().replace(/-/g, '').slice(0, 10);
 export const newCategoryId = () => 'cat-' + crypto.randomUUID().replace(/-/g, '').slice(0, 8);

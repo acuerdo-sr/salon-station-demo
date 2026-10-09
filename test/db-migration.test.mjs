@@ -94,14 +94,14 @@ test('a fresh database is seeded with the same sample workspace as the browser d
   } finally { await db.close(); }
 });
 
-test('a database created by the previous version gains wholesale prices, operator LINE IDs and the supply tables on startup', async () => {
+test('a database created by the previous version gains wholesale prices, operator LINE IDs, the supply tables, short descriptions and the new sample photos on startup', async () => {
   const { readFileSync } = await import('node:fs');
   const { importState } = await import('../db/import-state.mjs');
   // 前の版のテーブル定義を再現する（卸価格・管理者のLINE ID・仕入発注の表がない）
   const current = readFileSync(new URL('../db/schema.sqlite.sql', import.meta.url), 'utf8');
   const previous = current.slice(0, current.indexOf('-- 加盟店（サロン）からフランチャイザーへの仕入発注'))
-    .replace(' wholesale_price INTEGER NOT NULL DEFAULT 0,', '').replace(' line_id TEXT,', '').replace('CREATE UNIQUE INDEX IF NOT EXISTS operators_line_id ON operators(line_id);\n', '');
-  assert.ok(!previous.includes('wholesale_price') && !previous.includes('line_id TEXT,') && !previous.includes('supply_orders'));
+    .replace(' wholesale_price INTEGER NOT NULL DEFAULT 0,', '').replace(" summary TEXT NOT NULL DEFAULT '',", '').replace(' line_id TEXT,', '').replace('CREATE UNIQUE INDEX IF NOT EXISTS operators_line_id ON operators(line_id);\n', '');
+  assert.ok(!previous.includes('wholesale_price') && !previous.includes('summary') && !previous.includes('line_id TEXT,') && !previous.includes('supply_orders'));
   const db = await createSqliteAdapter(':memory:');
   try {
     await db.exec(previous);
@@ -112,8 +112,10 @@ test('a database created by the previous version gains wholesale prices, operato
       const without = { ...state, products: [], categories: [] };
       await importState(tx, without, { catalog: products, concernNames: concernCategories, now });
       const categoryIds = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil' };
+      // 前の版の写真：初期の写真のままの商品と、管理画面で写真を替えた商品
+      const oldImages = { 'shampoo-moist': 'shampoo.png', 'oil-smooth': 'oil.png', 'treatment-repair': 'uploads/products/00000000-0000-4000-8000-000000000000.webp' };
       for (const [name, id] of Object.entries(categoryIds)) await tx.run('INSERT INTO categories (id, name, sort_order) VALUES (?, ?, 0)', [id, name]);
-      for (const [i, p] of state.products.entries()) await tx.run('INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, 1, ?, ?)', [p.id, p.sku, p.brand, p.name, categoryIds[p.category], p.size, p.description, p.image, p.tag, p.price, p.cost, p.dealerId, p.stock, i, now]);
+      for (const [i, p] of state.products.entries()) await tx.run('INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, 1, ?, ?)', [p.id, p.sku, p.brand, p.name, categoryIds[p.category], p.size, p.description, oldImages[p.id] || p.image, p.tag, p.price, p.cost, p.dealerId, p.stock, i, now]);
       for (const op of demoOperators) await tx.run('INSERT INTO operators (id, email, name, role, salon_id, dealer_id, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [op.id, op.email, op.name, op.role, op.salonId || null, op.dealerId || null, '00', '00', now]);
       await tx.run("INSERT INTO app_meta (meta_key, meta_value) VALUES ('schema_version', '1')");
     });
@@ -123,8 +125,13 @@ test('a database created by the previous version gains wholesale prices, operato
     assert.ok((await db.tableColumns('operators')).includes('line_id'));
     for (const table of ['supply_orders', 'supply_order_items', 'supply_subscriptions', 'supply_subscription_items', 'invoices']) assert.equal(await db.tableExists(table), true, table);
     assert.equal(Number((await db.get("SELECT wholesale_price FROM products WHERE id='shampoo-moist'")).wholesale_price), 1859);
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '6');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '7');
     assert.ok((await db.tableColumns('members')).includes('privacy_version'));
+    // 一覧の短い説明が入り、初期の写真のままの商品だけ新しい写真になる
+    const row = id => db.get('SELECT summary, image FROM products WHERE id=?', [id]), catalogOf = id => products.find(p => p.id === id);
+    assert.deepEqual({ ...(await row('shampoo-moist')) }, { summary: catalogOf('shampoo-moist').summary, image: 'products/shampoo-moist.webp' });
+    assert.equal((await row('oil-smooth')).image, 'products/oil-smooth.webp');
+    assert.equal((await row('treatment-repair')).image, 'uploads/products/00000000-0000-4000-8000-000000000000.webp', '替えた写真はそのまま');
     const salonOp = { operator: demoOperators[1] }, ws = await store.request('/supply', 'GET', undefined, salonOp, now);
     assert.deepEqual(ws.orders, []);
     const o = await store.request('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity: 1, price: 1859 }] }, salonOp, now);

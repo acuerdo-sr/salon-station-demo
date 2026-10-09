@@ -3,7 +3,7 @@ import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAd
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js';
 import { validateProfile, profileComplete } from './member-store.js';
 import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION } from './catalog-core.js';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js';
 import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js';
 import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js';
@@ -102,7 +102,9 @@ export function migrate(state,catalog){
   if(!Array.isArray(state.categories)){state.categories=seedCategories(state.products||[]);changed=true;}
   for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';delete o.payment;changed=true;}
   // 品ぞろえの版2：以前のデータに、まだない初期商品と、そのカテゴリを足す（登録済みの商品・価格は変えない）
+  // 版3：一覧の短い説明（summary）と、作り直した初期商品の写真（以前の既定の写真のままの商品だけ）
   if((state.catalogVersion||1)<CATALOG_VERSION&&Array.isArray(state.products)&&Array.isArray(state.categories)){
+    for(const p of state.products){const src=(catalog||[]).find(c=>c.id===p.id);if(p.summary===undefined)p.summary=src?.summary||'';if(src&&legacyImages(p.id).includes(p.image))p.image=src.image;}
     for(const c of catalog||[])if(!state.products.some(p=>p.id===c.id))state.products.push(seedProduct(c));
     for(const name of new Set((catalog||[]).map(c=>c.category)))if(!state.categories.some(x=>x.name===name))state.categories.push({id:CATEGORY_IDS[name]||newCategoryId(),name,sortOrder:state.categories.length});
     state.catalogVersion=CATALOG_VERSION;changed=true;
@@ -330,7 +332,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
       const current={...p,categoryId:state.categories.find(c=>c.name===p.category)?.id};
       const {categoryId,...fields}=productInput({...current,...input},catalogContext(state));
       Object.assign(p,fields);if(input?.imageData)p.image=demoImage(input.imageData);
-    }else{if(['price','cost','enabled','wholesalePrice','sku','name','brand','categoryId','concerns','size','description','tag','dealerId','imageData'].some(k=>input?.[k]!==undefined))fail('ディーラーは在庫数のみ更新できます。',403);p.stock=int(input?.stock,0,99999);}
+    }else{if(['price','cost','enabled','wholesalePrice','sku','name','brand','categoryId','concerns','size','summary','description','tag','dealerId','imageData'].some(k=>input?.[k]!==undefined))fail('ディーラーは在庫数のみ更新できます。',403);p.stock=int(input?.stock,0,99999);}
     log(state,op,'商品・在庫を更新',p.sku,now);return clone(p);
   }
   // 価格の一括更新（管理画面の価格一括編集）。すべての行を確かめてから保存する

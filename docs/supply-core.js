@@ -1,7 +1,7 @@
 // 加盟店（サロン）からフランチャイザーへの仕入発注・定期発注・発注提案・月次請求・店販の取り分。
 // 検証・計算はブラウザ版（このファイルの supplyRequest）と DB版（db/platform-store.mjs）で共有する。
-import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js?v=25e99ea580';
-import { summarizeCustomers } from './privacy.js?v=25e99ea580';
+import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js?v=ba2e17dcc6';
+import { summarizeCustomers } from './privacy.js?v=ba2e17dcc6';
 
 export const supplyStatuses = { ordered: '受付待ち', accepted: '出荷準備中', shipped: '出荷済み', delivered: 'お届け済み', cancelled: 'キャンセル' };
 export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', shipped: 'delivered' };
@@ -170,7 +170,7 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
     const op = requireOperator(actor, ['salon']), salon = state.salons.find(s => s.id === op.salonId);
     const own = state.supplyOrders.filter(o => o.salonId === op.salonId);
     const history = own.filter(o => o.status !== 'cancelled').flatMap(o => o.items.map(i => ({ productId: i.id, orderedOn: o.orderedOn, quantity: i.quantity })));
-    const products = state.products.filter(p => p.enabled).map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '' }));
+    const products = state.products.filter(p => p.enabled).map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag, summary }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '', summary: summary || '' }));
     // 店販EC（今月・前月）。お客様の情報は渡さず、集計値だけを渡す
     const month = jst(now).slice(0, 7), monthOf = o => jst(o.createdAt).slice(0, 7);
     const sold = state.orders.filter(o => o.salonId === salon.id && !['cancelled', 'returned'].includes(o.status) && [month, monthBefore(month)].includes(monthOf(o)));

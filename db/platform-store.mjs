@@ -10,7 +10,7 @@ import {
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from '../dist/payment-core.js';
 import { validateProfile, profileComplete } from '../dist/member-store.js';
 import { encodeAddress, decodeAddress } from '../dist/person.js';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES } from '../dist/catalog-core.js';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES, legacyImages } from '../dist/catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from '../dist/shipping-csv.js';
 import { ISSUER, salonAddress } from '../dist/supply-core.js';
 import { schemaTable } from './adapter.mjs';
@@ -30,7 +30,7 @@ const READ_ONLY = new Set(['/quote', '/admin/sales']);
 const QUIET = new Set(['/cart', '/favorites', '/supply/favorites', '/admin/exports', '/admin/shipping-csv']);
 const quiet = route => QUIET.has(route) || /^\/(addresses|payment-methods)(\/|$)/.test(route);
 const SNAPSHOT_LIMIT = 1000;
-export const SCHEMA_VERSION = '6';
+export const SCHEMA_VERSION = '7';
 const KEY_CHECK = 'salon-station:key-check';
 // アクセス記録は追記のみ（SQLite）。MySQL ではアプリ用ユーザーに UPDATE / DELETE の権限を与えない（db/grants.mysql.sql）。
 const APPEND_ONLY_SQLITE = `CREATE TRIGGER IF NOT EXISTS data_access_logs_no_update BEFORE UPDATE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は変更できません'); END;
@@ -62,7 +62,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const rows = await q.all(`SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON c.id=p.category_id${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY p.sort_order, p.id`, params);
     if (!rows.length) return [];
     const concerns = await q.all(`SELECT pc.product_id, n.name FROM product_concerns pc JOIN concerns n ON n.id=pc.concern_id WHERE pc.product_id IN (${marks(rows)}) ORDER BY n.sort_order`, rows.map(r => r.id));
-    return rows.map(r => ({ id: r.id, brand: r.brand, name: r.name, category: r.category_name, concerns: concerns.filter(c => c.product_id === r.id).map(c => c.name), size: r.size, price: num(r.price), stock: num(r.stock), image: r.image, tag: r.tag, description: r.description, sku: r.sku, enabled: bool(r.enabled), dealerId: r.dealer_id, ...(withCost ? { cost: num(r.cost), wholesalePrice: num(r.wholesale_price) } : {}) }));
+    return rows.map(r => ({ id: r.id, brand: r.brand, name: r.name, category: r.category_name, concerns: concerns.filter(c => c.product_id === r.id).map(c => c.name), size: r.size, price: num(r.price), stock: num(r.stock), image: r.image, tag: r.tag, summary: r.summary || '', description: r.description, sku: r.sku, enabled: bool(r.enabled), dealerId: r.dealer_id, ...(withCost ? { cost: num(r.cost), wholesalePrice: num(r.wholesale_price) } : {}) }));
   }
   const loadDealers = async (q, dealerId) => (await q.all(`SELECT * FROM dealers${dealerId ? ' WHERE id=?' : ''} ORDER BY id DESC`, dealerId ? [dealerId] : [])).map(d => ({ id: d.id, name: d.name, short: d.short_name, area: d.area, lead: d.lead_time }));
   const profileFrom = m => ({ id: m.id, name: m.name, email: m.email, kana: m.kana, phone: m.phone, gender: m.gender, birthday: m.birthday, lineLinked: Boolean(m.line_id), salonId: m.salon_id, staffId: m.staff_id || '', createdAt: m.salon_linked_at || m.created_at });
@@ -491,8 +491,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       const op = requireOperator(actor, ['admin']), fields = productInput(input, await catalogContext(q));
       fields.sku = await nextProductSku(q);
       const id = newProductId(), image = input?.imageData ? saveImage(input.imageData) : '', sort = num((await q.get('SELECT MAX(sort_order) AS n FROM products'))?.n) + 1;
-      await q.run('INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)',
-        [id, fields.sku, fields.brand, fields.name, fields.categoryId, fields.size, fields.description, image, fields.tag, fields.price, fields.cost, fields.wholesalePrice, fields.dealerId, fields.stock, fields.enabled ? 1 : 0, sort, now]);
+      await q.run('INSERT INTO products (id, sku, brand, name, category_id, size, summary, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)',
+        [id, fields.sku, fields.brand, fields.name, fields.categoryId, fields.size, fields.summary, fields.description, image, fields.tag, fields.price, fields.cost, fields.wholesalePrice, fields.dealerId, fields.stock, fields.enabled ? 1 : 0, sort, now]);
       await saveConcerns(q, id, fields.concerns);
       if (fields.stock) await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'initial', '', ?, ?)", [id, fields.stock, op.name, now]);
       await audit(q, op, '商品を登録', fields.sku, now);
@@ -507,12 +507,12 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (op.role === 'admin') {
         const ctx = await catalogContext(q), u = productInput({ ...p, categoryId: ctx.categories.find(x => x.name === p.category)?.id, ...input }, ctx);
         const image = input?.imageData ? saveImage(input.imageData) : p.image;
-        await q.run('UPDATE products SET brand=?, name=?, category_id=?, size=?, description=?, image=?, tag=?, price=?, cost=?, wholesale_price=?, dealer_id=?, stock=?, enabled=?, updated_at=? WHERE id=?',
-          [u.brand, u.name, u.categoryId, u.size, u.description, image, u.tag, u.price, u.cost, u.wholesalePrice, u.dealerId, u.stock, u.enabled ? 1 : 0, now, p.id]);
+        await q.run('UPDATE products SET brand=?, name=?, category_id=?, size=?, summary=?, description=?, image=?, tag=?, price=?, cost=?, wholesale_price=?, dealer_id=?, stock=?, enabled=?, updated_at=? WHERE id=?',
+          [u.brand, u.name, u.categoryId, u.size, u.summary, u.description, image, u.tag, u.price, u.cost, u.wholesalePrice, u.dealerId, u.stock, u.enabled ? 1 : 0, now, p.id]);
         await saveConcerns(q, p.id, u.concerns);
         stock = u.stock;
       } else {
-        if (['price', 'cost', 'enabled', 'wholesalePrice', 'sku', 'name', 'brand', 'categoryId', 'concerns', 'size', 'description', 'tag', 'dealerId', 'imageData'].some(k => input?.[k] !== undefined)) fail('ディーラーは在庫数のみ更新できます。', 403);
+        if (['price', 'cost', 'enabled', 'wholesalePrice', 'sku', 'name', 'brand', 'categoryId', 'concerns', 'size', 'summary', 'description', 'tag', 'dealerId', 'imageData'].some(k => input?.[k] !== undefined)) fail('ディーラーは在庫数のみ更新できます。', 403);
         stock = int(input?.stock, 0, 99999);
         await q.run('UPDATE products SET stock=?, updated_at=? WHERE id=?', [stock, now, p.id]);
       }
@@ -785,6 +785,13 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (await db.tableExists('orders') && (await db.tableColumns('orders')).includes('ship_name') && !(await db.tableColumns('orders')).includes('payment_method')) await upgradeOrdersV5();
       const addColumn = async (table, column, sqliteType, mysqlType) => { if (await db.tableExists(table) && !(await db.tableColumns(table)).includes(column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${db.dialect === 'mysql' ? mysqlType : sqliteType}`); };
       await addColumn('member_addresses', 'phone', "TEXT NOT NULL DEFAULT ''", "VARCHAR(256) NOT NULL DEFAULT '' AFTER address");
+      // 版7：一覧の短い説明。初期商品には説明を入れ、以前の既定の写真のままなら作り直した写真に替える
+      const addedSummary = await db.tableExists('products') && !(await db.tableColumns('products')).includes('summary');
+      await addColumn('products', 'summary', "TEXT NOT NULL DEFAULT ''", "VARCHAR(200) NOT NULL DEFAULT '' AFTER size");
+      if (addedSummary) for (const p of catalog) {
+        await db.run("UPDATE products SET summary=? WHERE id=? AND summary=''", [p.summary || '', p.id]);
+        const old = legacyImages(p.id); await db.run(`UPDATE products SET image=? WHERE id=? AND image IN (${old.map(() => '?').join(', ')})`, [p.image, p.id, ...old]);
+      }
       await db.migrate();
       if (db.dialect === 'sqlite') await db.exec(APPEND_ONLY_SQLITE);
       if (addedWholesale) for (const p of await db.all('SELECT id, price FROM products')) await db.run('UPDATE products SET wholesale_price=? WHERE id=?', [wholesaleOf(num(p.price)), p.id]);

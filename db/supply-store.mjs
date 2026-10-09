@@ -65,7 +65,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     const sold = await q.all(`SELECT o.member_id, o.subtotal, o.fee, o.ordered_on, (SELECT COALESCE(SUM(i.unit_cost*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS purchase FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active}`, [salon.id, from, to]);
     const items = await q.all(`SELECT i.product_id, MAX(i.name) AS name, SUM(i.quantity) AS quantity, SUM(i.unit_price*i.quantity) AS sales FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active} GROUP BY i.product_id`, [salon.id, `${month}-01`, to]);
     const [stats] = await customerStats(q, [{ id: salon.id, name: salon.name }], now);
-    const shown = products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '' }));
+    const shown = products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag, summary }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '', summary: summary || '' }));
     const favorites = (await q.all('SELECT product_id FROM supply_favorites WHERE salon_id=? ORDER BY created_at, product_id', [salon.id])).map(r => r.product_id).filter(id => shown.some(p => p.id === id));
     const ec = ecSummary({ month, products: shown, members: { total: stats.members, newThisMonth: stats.newThisMonth, lineLinked: stats.lineLinked },
       orders: sold.map(o => ({ month: o.ordered_on.slice(0, 7), memberId: o.member_id, subtotal: num(o.subtotal), purchase: num(o.purchase), fee: num(o.fee) })),

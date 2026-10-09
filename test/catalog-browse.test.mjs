@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { products, concernCategories } from '../catalog.mjs';
 import { createPlatform, migrate, platformRequest } from '../dist/platform-core.js';
-import { CATALOG_VERSION } from '../dist/catalog-core.js';
+import { CATALOG_VERSION, productInput } from '../dist/catalog-core.js';
 import { brandInfo, FEATURES } from '../dist/brands.js';
 
 test('the sample catalogue covers several categories and brands; every illustration exists and every brand has an introduction', () => {
@@ -16,6 +16,7 @@ test('the sample catalogue covers several categories and brands; every illustrat
     assert.ok(existsSync(new URL(`../dist/assets/${p.image}`, import.meta.url)), p.image);
     assert.ok(p.concerns.every(c => concernCategories.includes(c)), p.id);
     assert.ok(brandInfo(p.brand).lead, p.brand);
+    assert.ok(p.summary && p.summary.length <= 60, `一覧の説明：${p.id}`);
   }
   assert.ok(products.some(p => !p.stock), '入荷待ちの表示を確かめる商品がある');
   for (const name of new Set(products.map(p => p.brand))) for (const key of ['image', 'hero']) assert.ok(existsSync(new URL(`../dist/assets/${brandInfo(name)[key]}`, import.meta.url)), `ブランドの絵（${key}）：${name}`);
@@ -27,9 +28,16 @@ test('older browser data gains the new sample products and categories once, with
   const state = createPlatform(products.slice(0, 6), '2026-10-09T03:00:00.000Z');
   delete state.catalogVersion;
   state.products[0].price = 2970; // 管理画面で変えた価格
+  // 版2までのデータ：一覧の説明がなく、写真は以前の既定のもの（1点は管理画面で替えた写真）
+  for (const p of state.products) delete p.summary;
+  state.products[0].image = 'shampoo.png'; state.products[2].image = 'oil.png'; state.products[1].image = 'data:image/webp;base64,AAAA';
   assert.equal(migrate(state, products), true);
   assert.equal(state.products.length, products.length);
   assert.equal(state.products[0].price, 2970, '登録済みの商品は変えない');
+  assert.equal(state.products[0].summary, products[0].summary);
+  assert.equal(state.products[0].image, 'products/shampoo-moist.webp');
+  assert.equal(state.products[2].image, 'products/oil-smooth.webp');
+  assert.equal(state.products[1].image, 'data:image/webp;base64,AAAA', '替えた写真はそのまま');
   assert.ok(['ヘアマスク', 'ヘアミルク・ミスト', 'スカルプケア', 'ヘアスタイリング'].every(n => state.categories.some(c => c.name === n)));
   assert.equal(state.catalogVersion, CATALOG_VERSION);
   assert.equal(migrate(state, products), false, '2回目は何もしない');
@@ -38,4 +46,12 @@ test('older browser data gains the new sample products and categories once, with
   assert.equal(boot.products.length, products.length);
   assert.ok(boot.categories.some(c => c.name === 'スカルプケア'));
   assert.equal(state.products.find(p => p.id === 'calme-scalp-serum').dealerId, 'botanica', '仕入先は商品の指定どおり');
+});
+
+test('the short description for product lists is optional and limited to 60 characters', () => {
+  const ctx = { categories: [{ id: 'shampoo', name: 'シャンプー' }], dealers: [{ id: 'sena' }], concernNames: [] };
+  const base = { brand: 'B', name: 'N', categoryId: 'shampoo', dealerId: 'sena', price: 1000, cost: 500, wholesalePrice: 700, stock: 1, enabled: true };
+  assert.equal(productInput(base, ctx).summary, '');
+  assert.equal(productInput({ ...base, summary: '  椿のオイルで、毛先までつややかに。 ' }, ctx).summary, '椿のオイルで、毛先までつややかに。');
+  assert.throws(() => productInput({ ...base, summary: 'あ'.repeat(61) }, ctx), /一覧の説明/);
 });

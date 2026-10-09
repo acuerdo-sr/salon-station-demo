@@ -40,9 +40,9 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   // 商品
   const skuOf = id => products.find(p => p.id === id)?.sku || catalog.find(p => p.id === id)?.sku || id;
   for (const [i, p] of products.entries()) {
-    await tx.run(`INSERT INTO products (id, sku, brand, name, category_id, size, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)`,
-    [p.id, skuOf(p.id), p.brand || '', p.name, categoryId(p.category), p.size || '', p.description || '', p.image || '', p.tag || '', p.price, p.cost ?? 0, p.wholesalePrice ?? wholesaleOf(p.price), p.dealerId, p.stock, p.enabled === false ? 0 : 1, i, now]);
+    await tx.run(`INSERT INTO products (id, sku, brand, name, category_id, size, summary, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)`,
+    [p.id, skuOf(p.id), p.brand || '', p.name, categoryId(p.category), p.size || '', p.summary || '', p.description || '', p.image || '', p.tag || '', p.price, p.cost ?? 0, p.wholesalePrice ?? wholesaleOf(p.price), p.dealerId, p.stock, p.enabled === false ? 0 : 1, i, now]);
     for (const c of p.concerns || []) await tx.run('INSERT INTO product_concerns (product_id, concern_id) VALUES (?, ?)', [p.id, concernId(c)]);
     await tx.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'initial', '', 'system', ?)", [p.id, p.stock, now]);
   }
