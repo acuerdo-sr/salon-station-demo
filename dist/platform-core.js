@@ -3,7 +3,7 @@ import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAd
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js';
 import { validateProfile, profileComplete } from './member-store.js';
 import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES } from './catalog-core.js';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION } from './catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js';
 import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js';
 import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js';
@@ -86,6 +86,8 @@ export const seedSalons=()=>[
   {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',prefecture:'山口県',city:'萩市',street:'椿東0-0-0',building:'',phone:'0838-00-0000',hours:'9:00〜18:00',holiday:'毎週月曜日・第3日曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'aoi',name:'AOI'}]},
 ];
 // 保存済みの状態（SQLite / ブラウザ）に、後から追加した項目（お悩みカテゴリ・店舗住所・会員任意項目）を補う。
+// 初期の商品：仕入値は売価の6割、仕入先は商品に指定があればそれ（なければヘアオイルは BOTANICA、ほかは SENA）
+const seedProduct=p=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.dealerId||(p.category==='ヘアオイル'?'botanica':'sena'),stock:p.stock});
 export function migrate(state,catalog){
   let changed=false;
   for(const p of state.products||[]){const src=catalog.find(c=>c.id===p.id);if(!Array.isArray(p.concerns)){p.concerns=[...(src?.concerns||[])];changed=true;}}
@@ -99,12 +101,18 @@ export function migrate(state,catalog){
   for(const k of ['addresses','cards'])if(!state[k]||typeof state[k]!=='object'||Array.isArray(state[k])){state[k]={};changed=true;}
   if(!Array.isArray(state.categories)){state.categories=seedCategories(state.products||[]);changed=true;}
   for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';delete o.payment;changed=true;}
+  // 品ぞろえの版2：以前のデータに、まだない初期商品と、そのカテゴリを足す（登録済みの商品・価格は変えない）
+  if((state.catalogVersion||1)<CATALOG_VERSION&&Array.isArray(state.products)&&Array.isArray(state.categories)){
+    for(const c of catalog||[])if(!state.products.some(p=>p.id===c.id))state.products.push(seedProduct(c));
+    for(const name of new Set((catalog||[]).map(c=>c.category)))if(!state.categories.some(x=>x.name===name))state.categories.push({id:CATEGORY_IDS[name]||newCategoryId(),name,sortOrder:state.categories.length});
+    state.catalogVersion=CATALOG_VERSION;changed=true;
+  }
   return changed;
 }
 
 export const seedDealers=()=>[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}];
 export function createPlatform(catalog,now=new Date().toISOString()){
-  const state={version:1,revision:0,products:catalog.map((p,i)=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.category==='ヘアオイル'?'botanica':'sena',stock:p.stock})),
+  const state={version:1,revision:0,catalogVersion:CATALOG_VERSION,products:catalog.map(seedProduct),
     salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[],accessLogs:[],addresses:{},cards:{}};
   state.categories=seedCategories(state.products);
   // Clearly fictional examples make the management screens useful on first visit.

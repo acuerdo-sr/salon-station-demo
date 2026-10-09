@@ -1,5 +1,6 @@
 // HTTPサーバーの結合テスト：会員限定（旧APIの撤去）、会員セッション、Origin検査、本文の文字コード、
 // ログイン試行制限、静的ファイル配信、再起動後の保持、個人情報の暗号化とアクセス記録。
+import { products as catalogProducts } from '../catalog.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -61,7 +62,7 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
       cookieA = a.cookie.split(';')[0]; memberA = a.body.member;
       assert.equal(memberA.hash, undefined);
       assert.equal((await call('/auth/register', 'POST', details('A@example.test'))).status, 400);
-      assert.equal((await call('/platform/bootstrap', 'GET', undefined, cookieA)).body.products.length, 6);
+      assert.equal((await call('/platform/bootstrap', 'GET', undefined, cookieA)).body.products.length, catalogProducts.length);
       assert.equal((await call('/platform/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, cookieA)).status, 200);
       const input = order(); const placed = await call('/platform/orders', 'POST', input, cookieA);
       assert.equal(placed.status, 200); orderA = placed.body;

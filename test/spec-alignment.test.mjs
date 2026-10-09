@@ -17,8 +17,8 @@ test('closed site: guests get no products or quotes, members and operators do',(
   const guest=platformRequest(s,'/bootstrap','GET',undefined,{});
   assert.equal(guest.closed,true);assert.deepEqual(guest.products,[]);assert.ok(guest.salons.length>=3);assert.equal(guest.salons[0].feeRate,undefined);
   assert.throws(()=>platformRequest(s,'/quote','POST',{salonId:'lumiere',items:[{id:'shampoo-moist',quantity:1,price:2860}]},{}),/ログイン/);
-  assert.equal(platformRequest(s,'/bootstrap','GET',undefined,{member}).products.length,6);
-  assert.equal(platformRequest(s,'/bootstrap','GET',undefined,admin).products.length,6);
+  assert.equal(platformRequest(s,'/bootstrap','GET',undefined,{member}).products.length,products.length);
+  assert.equal(platformRequest(s,'/bootstrap','GET',undefined,admin).products.length,products.length);
   assert.ok(platformRequest(s,'/bootstrap','GET',undefined,{member}).products.every(p=>Array.isArray(p.concerns)&&p.concerns.every(c=>concernCategories.includes(c))));
   assert.deepEqual([...new Set(products.flatMap(p=>p.concerns))].sort(),[...concernCategories].sort());
 });

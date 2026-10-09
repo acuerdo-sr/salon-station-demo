@@ -1,5 +1,6 @@
 // 業務ルールの共通テスト。ブラウザ版（dist/platform-core.js の state）と DB版（db/platform-store.mjs）に同じシナリオを流し、
 // 同じ結果になることを確認する。TEST_MYSQL_URL=mysql://… を指定すると MySQL 8.0 でも実行する（データベースは空にして使う）。
+import { products as catalogProducts } from '../catalog.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
@@ -26,7 +27,7 @@ for (const [name, create] of engines) {
     assert.deepEqual(guest.salons.map(s => s.id), ['lumiere', 'atelier', 'mori']);
     const a = await linked(e, 'a');
     const boot = await e.call('/bootstrap', 'GET', undefined, a);
-    assert.equal(boot.products.length, 6); assert.equal(boot.products[0].cost, undefined);
+    assert.equal(boot.products.length, catalogProducts.length); assert.equal(boot.products[0].cost, undefined);
     assert.deepEqual(boot.products.find(p => p.id === 'shampoo-moist').concerns, ['ダメージヘア対策', 'カラーケア']);
     assert.equal(boot.salons.find(s => s.id === 'lumiere').staff.map(s => s.name).join(), 'HARUKA,YUI');
     assert.equal((await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === 'shampoo-moist').cost, 1716);

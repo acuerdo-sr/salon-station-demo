@@ -81,11 +81,11 @@ test('a fresh database is seeded with the same sample workspace as the browser d
   try {
     const store = createPlatformStore(db, { catalog: products, concernNames: concernCategories });
     const result = await store.init({ now });
-    assert.equal(result.imported, false); assert.equal(result.orders, 8); assert.equal(result.products, 6);
+    assert.equal(result.imported, false); assert.equal(result.orders, 8); assert.equal(result.products, products.length);
     const counts = {};
     for (const table of ['salons', 'staff', 'dealers', 'categories', 'concerns', 'products', 'product_concerns', 'members', 'orders', 'purchase_orders', 'order_items', 'order_events', 'payments', 'stock_movements', 'audit_logs', 'operators'])
       counts[table] = Number((await db.get(`SELECT COUNT(*) AS n FROM ${table}`)).n);
-    assert.deepEqual(counts, { salons: 3, staff: 5, dealers: 2, categories: 3, concerns: 7, products: 6, product_concerns: 13, members: 8, orders: 8, purchase_orders: 8, order_items: 8, order_events: Number((await db.get('SELECT COUNT(*) AS n FROM order_events')).n), payments: 8, stock_movements: 6, audit_logs: 8, operators: 4 });
+    assert.deepEqual(counts, { salons: 3, staff: 5, dealers: 2, categories: new Set(products.map(p => p.category)).size, concerns: 7, products: products.length, product_concerns: products.reduce((n, p) => n + p.concerns.length, 0), members: 8, orders: 8, purchase_orders: 8, order_items: 8, order_events: Number((await db.get('SELECT COUNT(*) AS n FROM order_events')).n), payments: 8, stock_movements: products.length, audit_logs: 8, operators: 4 });
     const browser = createPlatform(products, now);
     const snap = await store.request('/admin/snapshot', 'GET', undefined, admin);
     assert.deepEqual(snap.products.map(p => [p.id, p.stock, p.cost, p.dealerId]), browser.products.map(p => [p.id, p.stock, p.cost, p.dealerId]));
@@ -105,7 +105,7 @@ test('a database created by the previous version gains wholesale prices, operato
   const db = await createSqliteAdapter(':memory:');
   try {
     await db.exec(previous);
-    const state = createPlatform(products, now);
+    const state = createPlatform(products.slice(0, 6), now); // 前の版の品ぞろえ（初期の6点）
     state.supplyOrders = []; state.supplySubscriptions = []; state.invoices = [];
     await db.transaction(async tx => {
       // 前の版の import と同じく、卸価格の列を使わずに商品を入れる

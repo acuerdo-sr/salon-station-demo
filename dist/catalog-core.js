@@ -81,7 +81,9 @@ export function applyPriceRow(row, current) {
 
 // お悩みカテゴリ（仕様書 2.2.8）と、初期データのカテゴリID（表示名は日本語、IDは英字で固定）
 export const CONCERN_NAMES = ['ダメージヘア対策', 'エイジングケア', '白髪対策', 'ボリュームアップ', '頭皮ケア', 'カラーケア', 'パーマケア'];
-export const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil' };
+export const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil', ヘアマスク: 'hair-mask', 'ヘアミルク・ミスト': 'hair-milk-mist', スカルプケア: 'scalp-care', ヘアスタイリング: 'hair-styling' };
+// 初期の品ぞろえの版。2：ダミー商品を30点（7カテゴリ・7ブランド）に増やした
+export const CATALOG_VERSION = 2;
 export const seedCategories = products => [...new Set(products.map(p => p.category))].map((name, i) => ({ id: CATEGORY_IDS[name] || `category-${i + 1}`, name, sortOrder: i }));
 export const newProductId = () => 'p-' + crypto.randomUUID().replace(/-/g, '').slice(0, 10);
 export const newCategoryId = () => 'cat-' + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
