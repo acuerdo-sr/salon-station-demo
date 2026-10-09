@@ -340,3 +340,57 @@
 .store-body .footer-bottom{border-top-color:var(--fc-line)}
 @media(max-width:900px){.store-search{display:none}}
 @media(max-width:650px){.store-body .fc-sec-head h2{font-size:32px}.store-body .store-film{border-radius:0 0 60px 0}.store-hello b{font-size:18px}.fc-circles{gap:18px 22px}.fc-circles span{width:72px;height:72px}.fc-circles svg{width:34px;height:34px}.store-body .store-content.fc-sec{padding-top:22px;padding-bottom:22px}.store-body .member-home{padding-top:20px}.store-body .category-pills button{padding:7px 14px}}
+/* ===== 購入の流れ（商品詳細・カート・お届け先とお支払い・確認・完了をそれぞれのページに。FORCISE の構成に合わせる） ===== */
+.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--fc-mute);margin-bottom:22px}
+.crumbs button{color:var(--fc-sub);font-size:12px;padding:0}.crumbs button:hover{color:var(--fc-ink);text-decoration:underline}
+.crumbs b{font-weight:400;color:var(--fc-ink)}
+.store-body .store-page.product-page{max-width:1120px}
+.pd{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:48px;align-items:start}
+.pd-photo{position:relative;aspect-ratio:1;border-radius:18px;overflow:hidden;background:var(--fc-grey)}.pd-photo img{width:100%;height:100%;object-fit:cover}
+.pd-info{display:grid;gap:10px;align-content:start}
+.store-body .pd-info h1{font-family:var(--fc-jp);font-size:24px;font-weight:600;letter-spacing:.03em;line-height:1.5;margin:0}
+.pd-price{font-family:var(--fc-en);font-size:30px;font-weight:500;margin:6px 0 0}.pd-price small{font-family:var(--fc-jp);font-size:13px;color:var(--fc-mute);margin-left:4px}
+.pd-badges{display:flex;gap:8px;flex-wrap:wrap;margin:0}
+.pd-buy{display:grid;gap:10px;margin-top:10px;padding-top:16px;border-top:1px solid var(--fc-line)}
+.pd-qty{display:flex;align-items:center;gap:14px;font-size:13px}
+.store-body .pd-buy .btn{margin:0;width:100%;min-height:52px;font-size:16px}
+.store-body .pd-fav{min-height:44px;font-size:14px}.store-body .pd-fav.saved{color:var(--fc-out);border-color:var(--fc-out)}
+.pd-incart{font-size:13px;color:var(--fc-sub);margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pd-desc{margin-top:44px;padding-top:28px;border-top:1px solid var(--fc-line);display:grid;gap:14px}
+.store-body .pd-desc h2{font-family:var(--fc-jp);font-size:18px;font-weight:600;margin:0}
+.pd-desc p{font-size:14px;line-height:2;color:var(--fc-sub);margin:0}
+.pd-desc .detail-list{max-width:560px}
+.product-page .fc-sec{margin-top:40px}
+.pd-sticky{display:none}
+/* 手順 */
+.fc-flow{display:grid;grid-template-columns:repeat(4,1fr);list-style:none;padding:0;margin:0 0 28px;counter-reset:none;position:relative}
+.fc-flow li{position:relative;display:grid;justify-items:center;gap:6px;font-size:12px;color:var(--fc-mute);text-align:center}
+.fc-flow li::before{content:"";position:absolute;top:14px;left:-50%;width:100%;height:2px;background:var(--fc-line);z-index:0}
+.fc-flow li:first-child::before{display:none}
+.fc-flow li span{position:relative;z-index:1;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#fff;border:2px solid var(--fc-line);font-family:var(--fc-en);font-size:13px}
+.fc-flow li.done,.fc-flow li.current{color:var(--fc-ink)}
+.fc-flow li.done::before,.fc-flow li.current::before{background:var(--fc-dark)}
+.fc-flow li.done span{background:var(--fc-dark);border-color:var(--fc-dark);color:#fff}
+.fc-flow li.current span{border-color:var(--fc-dark);color:var(--fc-ink);font-weight:600}
+.fc-flow li.current{font-weight:600}
+.store-body .flow-page{max-width:1080px}
+.store-body .flow-page>h1{font-size:24px;margin-bottom:20px}
+.store-body .flow-page #checkout-form{max-width:760px}
+/* カート */
+.cart-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:32px;align-items:start}
+.cart-items{display:grid;gap:0}
+.cart-row{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:18px;align-items:center;padding:18px 0;border-bottom:1px solid var(--fc-line)}
+.cart-row-photo{padding:0;width:96px;height:96px;border-radius:12px;overflow:hidden;background:var(--fc-grey)}.cart-row-photo img{width:100%;height:100%;object-fit:cover}
+.cart-row-copy{display:grid;gap:4px;min-width:0}
+.cart-row-name{font-size:15px;font-weight:600;text-align:left;padding:0;color:var(--fc-ink)}.cart-row-name:hover{text-decoration:underline}
+.cart-row-ops{display:flex;align-items:center;gap:16px;margin-top:6px}
+.cart-row>strong{font-family:var(--fc-en);font-size:17px;font-weight:500}
+.cart-clear{justify-self:start;margin-top:14px;font-size:13px}
+.cart-summary{position:sticky;top:20px;border:1px solid var(--fc-line);border-radius:16px;padding:22px;display:grid;gap:12px;background:#fff}
+.cart-summary .total-list{margin:0}
+.store-body .cart-summary .btn{margin:0}
+.cart-free{font-size:13px;color:var(--fc-sub);margin:0;padding:10px 12px;background:var(--fc-grey);border-radius:10px;text-align:center}.cart-free b{color:var(--fc-ink)}
+.form-actions.center{justify-content:center}
+.store-body .flow-page .success-copy h1{font-size:24px;margin:6px 0 12px}
+@media(max-width:900px){.pd{grid-template-columns:1fr;gap:24px}.cart-layout{grid-template-columns:1fr}.cart-summary{position:static}}
+@media(max-width:650px){.store-body .pd-info h1{font-size:19px}.pd-price{font-size:26px}.pd-sticky{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.97);border-top:1px solid var(--fc-line)}.pd-sticky span{font-family:var(--fc-en);font-size:18px}.pd-sticky small{font-family:var(--fc-jp);font-size:11px;color:var(--fc-mute);margin-left:3px}.store-body .pd-sticky .btn{margin:0;width:auto;min-height:44px}.product-page,.store-body .flow-page{padding-bottom:110px}.fc-flow li{font-size:10px}.fc-flow li span{width:26px;height:26px;font-size:12px}.fc-flow li::before{top:12px}.cart-row{grid-template-columns:72px minmax(0,1fr);gap:4px 12px}.cart-row-photo{width:72px;height:72px;grid-row:span 2}.cart-row>strong{grid-column:2;font-size:15px}.store-body .flow-page>h1{font-size:20px}}
