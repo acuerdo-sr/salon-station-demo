@@ -158,3 +158,87 @@
 /* 発注画面：担当スタッフ */
 .staff-add{grid-template-columns:1fr auto;align-items:end}.staff-add label{display:grid;gap:6px;font-size:12px}.staff-row b{font-size:15px}.staff-order{display:flex;gap:6px}.staff-order .icon-btn{width:36px;height:36px;border:1px solid var(--line);border-radius:8px}.staff-order .icon-btn:disabled{opacity:.35}
 .staff-row{gap:6px}.staff-row .form-actions{margin:0;padding:0}
+/* ===== ストアの見た目（トップの映像に合わせる）=====
+   生成りの地・深い緑・明朝の見出し・細い英字の小見出し・丸い濃色のボタン・アーチ形の商品写真。管理画面には影響しない（.store-body の中だけ） */
+.store-body{--green:#20261f;--sage:#efede6;--line:#dcdcd2;--ink:#242922;--muted:#6f746a;--st-bg:#f7f5ef;--st-card:#fbfaf6;--st-dark:#20261f;--st-dark-hover:#334031;--st-champ:#8a7253;--st-champ-soft:#ebe5d8;--st-cream:#f7f5ef;--st-mincho:'Yu Mincho','YuMincho','Hiragino Mincho ProN','Noto Serif JP',serif;--st-en:'Outfit','Segoe UI',sans-serif;background:var(--st-bg);color:var(--ink)}
+/* 上部 */
+.store-body .demo-ribbon{background:var(--st-dark);color:#cfd2c6}
+.store-body .store-header{background:var(--st-bg);border-bottom-color:var(--line)}
+.store-body .store-logo{font-family:var(--st-en);font-weight:300;letter-spacing:.2em;color:var(--ink)}
+.store-body .store-logo small{font-family:var(--st-en);font-weight:400;letter-spacing:.32em;color:var(--muted)}
+.store-body .salon-select{color:var(--muted)}
+.store-body .salon-select b,.store-body .store-header-actions button{color:var(--ink)}
+.store-body .cart-count{background:var(--st-dark);color:var(--st-cream)}
+.store-body .store-nav{color:var(--muted)}
+.store-body .store-nav button.active{color:var(--ink);font-weight:500}
+.store-body .store-nav button.active:after{height:1px;background:var(--ink)}
+.store-body .store-benefits,.store-body .store-benefits>div{border-color:var(--line)}
+.store-body .store-benefits .icon{color:var(--st-champ)}
+.store-body .store-benefits small{color:var(--muted)}
+/* 見出し：細い線つきの英字の小見出し＋明朝の日本語 */
+.store-body .eyebrow{color:var(--st-champ)}
+.store-body .store-section-head .eyebrow,.store-body .store-page>.eyebrow{display:flex;align-items:center;gap:12px}
+.store-body .store-section-head .eyebrow::before,.store-body .store-page>.eyebrow::before{content:"";width:28px;height:1px;background:currentColor}
+.store-body .store-section-head h2,.store-body .store-page h1,.store-body .account-panel h2,.store-body .modal-head h2{font-family:var(--st-mincho);font-weight:500;letter-spacing:.08em;color:var(--ink)}
+.store-body .store-section-head>p{color:var(--muted);letter-spacing:.1em}
+.store-body .modal-head h2{letter-spacing:.04em}
+/* 絞り込み・検索 */
+.store-body .category-pills button{background:transparent;border:1px solid var(--line);border-radius:999px;color:#4d5249;padding:8px 18px}
+.store-body .category-pills button:hover{border-color:var(--ink)}
+.store-body .category-pills button.active{background:var(--st-dark);border-color:var(--st-dark);color:var(--st-cream)}
+.store-body .pills-label{color:var(--muted)}
+.store-body .concern-tags span{background:var(--st-champ-soft);color:#6b5a43;border-radius:999px}
+.store-body input,.store-body select,.store-body textarea{border-color:var(--line);border-radius:4px;background:#fffefb}
+.store-body .product-search .icon{color:var(--muted)}
+/* 商品カード：上がアーチ形の写真 */
+.store-body .product-card .photo{background:linear-gradient(180deg,#efede6,#e4e0d6);border-radius:999px 999px 6px 6px;aspect-ratio:4/4.7}
+.store-body .product-tag{top:auto;bottom:12px;left:12px;background:rgba(251,250,246,.92);color:var(--st-champ);font-family:var(--st-en);letter-spacing:.14em;border-radius:999px;padding:4px 10px}
+.store-body .favorite-btn{top:auto;bottom:10px;right:10px;background:rgba(251,250,246,.92);color:var(--muted)}
+.store-body .favorite-btn.saved{color:#a0655c}
+.store-body .soldout-layer{inset:0;display:grid;place-items:center;background:rgba(247,245,239,.55);color:var(--ink);font-family:var(--st-en);letter-spacing:.3em}
+.store-body .brand-label{font-family:var(--st-en);font-weight:500;letter-spacing:.16em;color:var(--st-champ)}
+.store-body .product-name{color:var(--ink)}
+.store-body .product-card .size,.store-body .price small{color:var(--muted)}
+.store-body .product-card .price{font-family:var(--st-en);font-weight:400;letter-spacing:.02em}
+.store-body .add-cart{background:var(--st-dark);border-color:var(--st-dark);color:var(--st-cream);border-radius:999px;padding:9px 18px}
+.store-body .add-cart:hover{background:var(--st-dark-hover)}
+/* サロンからのひとこと：トップと同じ深い緑の面 */
+.store-body .salon-message{background:var(--st-dark);color:var(--st-cream);border-radius:4px 4px 60px 4px;padding:34px 40px}
+.store-body .salon-message .eyebrow{color:#cfc6a8}
+.store-body .salon-message h3{font-family:var(--st-mincho);color:var(--st-cream)}
+.store-body .salon-message p{color:rgba(247,245,239,.75)}
+.store-body .salon-monogram{background:transparent;border:1px solid rgba(247,245,239,.45);color:#ddd8b8;font-style:italic}
+.store-body .salon-message .text-link{color:var(--st-cream);border-bottom:1px solid rgba(247,245,239,.5);padding-bottom:6px}
+/* ボタン・お知らせ・カード */
+.store-body .btn{border-radius:999px;letter-spacing:.06em}
+.store-body .btn.primary{background:var(--st-dark);color:var(--st-cream)}
+.store-body .btn.primary:hover{background:var(--st-dark-hover)}
+.store-body .btn.outline{background:transparent;border-color:var(--ink);color:var(--ink)}
+.store-body .btn.soft{background:var(--st-champ-soft);color:var(--ink)}
+.store-body .text-link{color:var(--ink)}
+.store-body .notice{background:#efede6;border-color:#e2ddd0;color:#5f5a4c;border-radius:4px}
+.store-body .account-panel,.store-body .order-card,.store-body .shipment,.store-body .address-list li,.store-body .choice-group,.store-body .salon-choice{background:var(--st-card);border-color:var(--line);border-radius:6px}
+.store-body .salon-choice.selected{border-color:var(--ink);background:#efede6}
+.store-body .choice input{accent-color:var(--st-dark)}
+/* 画面の上に開く窓 */
+.store-body #modal{background:var(--st-card);border-radius:8px}
+.store-body .modal-head{background:var(--st-card)}
+.store-body .login-tabs button.active{border-bottom-color:var(--ink);color:var(--ink)}
+.store-body .flow-steps b{color:var(--ink)}
+.store-body .review-salon{border-left-color:var(--st-champ);background:#efede6}
+.store-body .timeline li{border-left-color:var(--line)}
+.store-body .timeline li:before{background:var(--st-champ)}
+.store-body .success-mark{background:var(--st-champ-soft);color:var(--st-dark)}
+.store-body .detail-product>img{border-radius:999px 999px 6px 6px;background:#efede6}
+.store-body .cart-line img{border-radius:999px 999px 4px 4px}
+.store-body #toast{background:var(--st-dark);color:var(--st-cream);border-radius:999px}
+/* ページ下部：深い緑 */
+.store-body .store-footer{background:var(--st-dark);color:#d8d6cc}
+.store-body .store-footer .store-logo{color:var(--st-cream)}
+.store-body .store-footer .store-logo small,.store-body .footer-bottom,.store-body .demo-links{color:#a9ac9f}
+.store-body .footer-links,.store-body .demo-links a{color:#d8d6cc}
+.store-body .footer-bottom{border-top-color:rgba(247,245,239,.14)}
+.store-body .soldout-layer span{background:rgba(251,250,246,.94);color:var(--ink);font-family:inherit;letter-spacing:.12em;padding:7px 16px;border-radius:999px;font-size:12px}
+.store-body .detail-price{font-family:var(--st-en);font-size:26px;letter-spacing:.02em;margin:14px 0 2px}.store-body .detail-price small{font-family:inherit;font-size:13px;color:var(--muted)}
+.store-body .detail-product h3{font-family:var(--st-mincho);font-weight:500;letter-spacing:.06em}
+@media(max-width:650px){.store-body .salon-message{padding:26px 24px;border-radius:4px 4px 44px 4px}.store-body .store-section-head h2,.store-body .store-page h1{font-size:24px;letter-spacing:.04em}.store-body .category-pills button{padding:7px 14px}}
