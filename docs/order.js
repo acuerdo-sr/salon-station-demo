@@ -30,14 +30,14 @@ function monthSummary() { const month = today().slice(0, 7), rows = activeOrders
 const shortDate = iso => date(iso).replace(/^\d+\//, '');
 
 // ---- 部品
-const secHead = (en, ja, extra = '') => `<div class="b2b-sec-head"><h2>${en}</h2><span>${ja}</span>${extra}</div>`;
+const secHead = (en, ja, extra = '') => `<div class="fc-sec-head"><h2>${en}</h2><span>${ja}</span>${extra}</div>`;
 function qtyControl(p) { const q = cart[p.id] || 0; return `<div class="qty-control"><button data-step="${esc(p.id)}" data-delta="-1" ${q ? '' : 'disabled'} aria-label="${esc(p.name)}を1点減らす">−</button><span>${q}</span><button data-step="${esc(p.id)}" data-delta="1" ${q >= p.stock ? 'disabled' : ''} aria-label="${esc(p.name)}を1点増やす">＋</button></div>`; }
-const stockTags = p => { const s = stockState(p.stock); return `<span class="b2b-stock ${s.code}">${esc(s.label)}</span><span class="b2b-ship">出荷予定：${esc(shipEstimate(p.stock).label)}</span>`; };
+const stockTags = p => { const s = stockState(p.stock); return `<span class="fc-stock ${s.code}">${esc(s.label)}</span><span class="fc-ship">出荷予定：${esc(shipEstimate(p.stock).label)}</span>`; };
 const favButton = p => { const on = isFavorite(p.id); return `<button class="b2b-fav${on ? ' on' : ''}" data-fav="${esc(p.id)}" aria-pressed="${on}" aria-label="${esc(p.name)}を${on ? 'いつもの商品から外す' : 'いつもの商品に登録する'}">${on ? '★' : '☆'}</button>`; };
-const productRow = p => `<article class="b2b-row"><img src="${esc(imageUrl(p.image))}" alt=""><div class="b2b-row-copy"><small class="b2b-brand">${esc(p.brand)}</small><b>${esc(p.name)}</b><small class="b2b-meta">品番 ${esc(p.sku)}　${esc(p.size)}</small><div class="b2b-tags">${stockTags(p)}</div></div><div class="b2b-row-price"><b>${money(p.wholesalePrice)}</b><small>卸価格・税込<br>売価 ${money(p.price)}</small></div><div class="b2b-row-actions">${favButton(p)}${qtyControl(p)}</div></article>`;
-function productCard(p) { const q = cart[p.id] || 0, s = stockState(p.stock); return `<article class="b2b-card"><div class="b2b-card-photo"><img src="${esc(imageUrl(p.image))}" alt="">${p.tag ? `<span class="b2b-card-tag">${esc(p.tag)}</span>` : ''}</div><small class="b2b-brand">${esc(p.brand)}</small><b>${esc(p.name)}</b><small class="b2b-meta">品番 ${esc(p.sku)}　${esc(p.size)}</small><span class="b2b-stock ${s.code}">${esc(s.label)}</span><div class="b2b-card-foot"><span>${money(p.wholesalePrice)}<small>税込</small></span><button class="btn small ${q ? 'soft' : 'primary'}" data-add="${esc(p.id)}" ${p.stock > q ? '' : 'disabled'}>${!p.stock ? '欠品中' : q ? `＋1（${q}点）` : 'カートへ'}</button></div></article>`; }
+const productRow = p => `<article class="b2b-row"><img src="${esc(imageUrl(p.image))}" alt=""><div class="b2b-row-copy"><small class="fc-brand">${esc(p.brand)}</small><b>${esc(p.name)}</b><small class="fc-meta">品番 ${esc(p.sku)}　${esc(p.size)}</small><div class="b2b-tags">${stockTags(p)}</div></div><div class="b2b-row-price"><b>${money(p.wholesalePrice)}</b><small>卸価格・税込<br>売価 ${money(p.price)}</small></div><div class="b2b-row-actions">${favButton(p)}${qtyControl(p)}</div></article>`;
+function productCard(p) { const q = cart[p.id] || 0, s = stockState(p.stock); return `<article class="fc-card"><div class="fc-card-photo"><img src="${esc(imageUrl(p.image))}" alt="">${p.tag ? `<span class="fc-card-tag">${esc(p.tag)}</span>` : ''}</div><small class="fc-brand">${esc(p.brand)}</small><b>${esc(p.name)}</b><small class="fc-meta">品番 ${esc(p.sku)}　${esc(p.size)}</small><span class="fc-stock ${s.code}">${esc(s.label)}</span><div class="fc-card-foot"><span>${money(p.wholesalePrice)}<small>税込</small></span><button class="btn small ${q ? 'soft' : 'primary'}" data-add="${esc(p.id)}" ${p.stock > q ? '' : 'disabled'}>${!p.stock ? '欠品中' : q ? `＋1（${q}点）` : 'カートへ'}</button></div></article>`; }
 const STEPS = ['ordered', 'accepted', 'shipped', 'delivered'];
-const shipLine = o => `<article class="b2b-ship-line"><div class="between"><div><b>${esc(o.id)}</b><small>${date(o.createdAt, true)}・${o.items.length}商品・${money(o.total)}</small></div>${badge(o.status, supplyStatuses[o.status])}</div><ol class="b2b-steps">${STEPS.map((s, i) => `<li class="${STEPS.indexOf(o.status) >= i ? 'done' : ''}">${supplyStatuses[s]}</li>`).join('')}</ol>${o.tracking ? `<small>配送：${esc(o.carrier)}　追跡番号 ${esc(o.tracking)}</small>` : ''}</article>`;
+const shipLine = o => `<article class="fc-ship-line"><div class="between"><div><b>${esc(o.id)}</b><small>${date(o.createdAt, true)}・${o.items.length}商品・${money(o.total)}</small></div>${badge(o.status, supplyStatuses[o.status])}</div><ol class="fc-steps">${STEPS.map((s, i) => `<li class="${STEPS.indexOf(o.status) >= i ? 'done' : ''}">${supplyStatuses[s]}</li>`).join('')}</ol>${o.tracking ? `<small>配送：${esc(o.carrier)}　追跡番号 ${esc(o.tracking)}</small>` : ''}</article>`;
 const suggestLine = x => `<article class="suggest-card"><div><b>${esc(x.name)}</b><small>いつも約${x.averageDays}日ごと・前回 ${esc(x.lastOrderedOn.slice(5).replace('-', '/'))}（${x.daysSince}日前）</small></div><button class="btn soft small" data-suggest="${esc(x.productId)}" data-qty="${x.quantity}">${x.quantity}点を追加</button></article>`;
 
 // ---- ログイン前：ブランドを伝える画面
@@ -51,7 +51,7 @@ function loginView(message = '') {
       ${isPages ? `<button class="btn line full" data-line-demo>LINEで発注を始める（デモ）</button><p class="subtle-note">公開デモはLINEと通信せず、架空の加盟店「LUMIÈRE 表参道」の担当者としてログインします。</p>` : line.orderLiffId ? '<p class="subtle-note">LINEのトーク画面から開くと、連携済みのアカウントで自動的にログインします。</p>' : ''}
       <form id="login-form" class="stack"><label>メールアドレス<input name="email" type="email" autocomplete="username" value="salon@example.test" required></label><label>パスワード<input name="password" type="password" autocomplete="current-password" value="${esc(DEMO_OPERATOR_PASSWORD)}" required></label><div id="form-error" class="error" role="alert"></div><button class="btn primary full" type="submit">ログイン ${icon('arrow')}</button></form>
       <p class="subtle-note">体験用：加盟店アカウント salon@example.test / ${esc(DEMO_OPERATOR_PASSWORD)}</p></section></main>
-    <section class="b2b-service" aria-label="ご利用の特典">${[['truck', '当日出荷', '平日15時までのご注文は<br>当日出荷します（デモ設定）'], ['bag', '送料無料', '11,000円（税込）以上で<br>送料無料です'], ['wallet', '請求書払い', '月末締め・翌月末までに<br>お振込みください'], ['refresh', 'かんたん再注文', '前回と同じ内容を<br>ワンタップで発注']].map(([i, t, d]) => `<div>${icon(i)}<b>${t}</b><p>${d}</p></div>`).join('')}</section>`;
+    <section class="fc-service" aria-label="ご利用の特典">${[['truck', '当日出荷', '平日15時までのご注文は<br>当日出荷します（デモ設定）'], ['bag', '送料無料', '11,000円（税込）以上で<br>送料無料です'], ['wallet', '請求書払い', '月末締め・翌月末までに<br>お振込みください'], ['refresh', 'かんたん再注文', '前回と同じ内容を<br>ワンタップで発注']].map(([i, t, d]) => `<div>${icon(i)}<b>${t}</b><p>${d}</p></div>`).join('')}</section>`;
   // 映像は音声なしで再生する（「視差効果を減らす」設定では再生しない）
   const v = $('.b2b-film video'); if (v && !matchMedia('(prefers-reduced-motion: reduce)').matches) v.play().catch(() => {});
 }
@@ -71,9 +71,9 @@ function shell() {
 }
 function homePage() {
   const last = activeOrders()[0], fav = favorites(), usual = fav.length ? fav : frequentProducts().slice(0, 6), recent = recentProducts(), moving = movingOrders(), news = newProducts(), month = monthSummary();
-  const tile = (ic, label, sub, attrs) => `<button class="b2b-tile" ${attrs}><span class="b2b-tile-icon">${icon(ic)}</span><b>${label}</b><small>${sub}</small></button>`;
+  const tile = (ic, label, sub, attrs) => `<button class="fc-tile" ${attrs}><span class="fc-tile-icon">${icon(ic)}</span><b>${label}</b><small>${sub}</small></button>`;
   return `<section class="b2b-hello"><div><small>${esc(ws.salon.name)} 様</small><b>いつもの発注を、すぐに。</b></div><p>今月のご発注 ${month.count}件・${money(month.total)}</p></section>
-    <section class="b2b-tiles" aria-label="よく使う操作">
+    <section class="fc-tiles" aria-label="よく使う操作">
       ${tile('refresh', '前回と同じ内容で発注', last ? `${shortDate(last.createdAt)}・${last.items.length}商品` : '発注履歴はまだありません', last ? `data-reorder="${esc(last.id)}"` : 'disabled')}
       ${tile('heart', 'いつもの商品', fav.length ? `お気に入り ${fav.length}商品` : '☆を押して登録できます', 'data-jump="usual"')}
       ${tile('grid', '品番でまとめて発注', '品番と数量を入力・貼り付け', 'data-quick')}
@@ -81,20 +81,20 @@ function homePage() {
       ${tile('bag', '発注履歴', `${activeOrders().length}件`, 'data-page="history"')}
       ${tile('truck', '発送状況', moving.length ? `${moving.length}件が進行中` : '進行中の発注はありません', moving.length ? 'data-jump="shipping"' : 'data-page="history"')}
     </section>
-    ${moving.length ? `<section class="b2b-sec" id="shipping">${secHead('Shipping', '発送状況')}${moving.map(shipLine).join('')}</section>` : ''}
-    <section class="b2b-sec" id="usual">${secHead('Usual', 'いつもの商品', `<button class="text-link" data-page="products">すべての商品を見る ${icon('arrow')}</button>`)}
+    ${moving.length ? `<section class="fc-sec" id="shipping">${secHead('Shipping', '発送状況')}${moving.map(shipLine).join('')}</section>` : ''}
+    <section class="fc-sec" id="usual">${secHead('Usual', 'いつもの商品', `<button class="text-link" data-page="products">すべての商品を見る ${icon('arrow')}</button>`)}
       ${fav.length ? '' : `<p class="subtle-note">${usual.length ? 'よく発注する商品です。' : ''}商品の ☆ を押すと「いつもの商品」に登録できます。</p>`}
       ${usual.length ? usual.map(productRow).join('') : empty('まだ発注がありません', '「商品一覧」から商品を選んでください。', `<button class="btn primary" data-page="products">商品一覧へ</button>`)}</section>
-    ${ws.suggestions.length ? `<section class="b2b-sec">${secHead('Suggest', '発注のご提案')}<p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${ws.suggestions.map(suggestLine).join('')}</section>` : ''}
-    ${recent.length ? `<section class="b2b-sec" id="recent">${secHead('Recent', '最近買った商品')}<div class="b2b-cards">${recent.map(productCard).join('')}</div></section>` : ''}
-    ${news.length ? `<section class="b2b-sec">${secHead('New', '新製品')}<p class="subtle-note">新しく入った商品です。</p><div class="b2b-cards">${news.map(productCard).join('')}</div></section>` : ''}
+    ${ws.suggestions.length ? `<section class="fc-sec">${secHead('Suggest', '発注のご提案')}<p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${ws.suggestions.map(suggestLine).join('')}</section>` : ''}
+    ${recent.length ? `<section class="fc-sec" id="recent">${secHead('Recent', '最近買った商品')}<div class="fc-cards">${recent.map(productCard).join('')}</div></section>` : ''}
+    ${news.length ? `<section class="fc-sec">${secHead('New', '新製品')}<p class="subtle-note">新しく入った商品です。</p><div class="fc-cards">${news.map(productCard).join('')}</div></section>` : ''}
     ${ecGlance()}`;
 }
 function productsPage() {
   const cats = [...new Set(ws.products.map(p => p.category))], q = query.normalize('NFKC').toLowerCase();
   const rows = ws.products.filter(p => (!category || p.category === category) && (!onlyFavorites || isFavorite(p.id)) && (!hideOut || p.stock > 0) && (!q || `${p.sku} ${p.name} ${p.brand}`.toLowerCase().includes(q)));
-  return `<section class="b2b-sec">${secHead('Products', '商品一覧', `<button class="btn outline small" data-quick>品番でまとめて発注</button>`)}
-    <div class="b2b-filters"><div class="b2b-chips">${[['', 'すべて'], ...cats.map(c => [c, c])].map(([v, l]) => `<button class="${category === v ? 'active' : ''}" data-category="${esc(v)}">${esc(l)}</button>`).join('')}</div><label class="check-label"><input type="checkbox" id="only-fav" ${onlyFavorites ? 'checked' : ''}>いつもの商品だけ</label><label class="check-label"><input type="checkbox" id="hide-out" ${hideOut ? 'checked' : ''}>欠品中の商品を隠す</label></div>
+  return `<section class="fc-sec">${secHead('Products', '商品一覧', `<button class="btn outline small" data-quick>品番でまとめて発注</button>`)}
+    <div class="b2b-filters"><div class="fc-chips">${[['', 'すべて'], ...cats.map(c => [c, c])].map(([v, l]) => `<button class="${category === v ? 'active' : ''}" data-category="${esc(v)}">${esc(l)}</button>`).join('')}</div><label class="check-label"><input type="checkbox" id="only-fav" ${onlyFavorites ? 'checked' : ''}>いつもの商品だけ</label><label class="check-label"><input type="checkbox" id="hide-out" ${hideOut ? 'checked' : ''}>欠品中の商品を隠す</label></div>
     <p class="subtle-note">${query ? `「${esc(query)}」の検索結果　` : ''}${rows.length}商品・卸価格（税込）。11,000円以上で送料無料。</p>
     ${rows.length ? rows.map(productRow).join('') : empty('該当する商品がありません', '条件を変えてお試しください。')}</section>`;
 }
@@ -149,7 +149,7 @@ function staffTab() {
 function historyTab() {
   const rows = [...ws.orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return `${secHead('History', '発注履歴')}${rows.length ? rows.map(o => `<article class="supply-order"><div class="between"><div><b>${esc(o.id)}</b><small>${date(o.createdAt, true)}・${esc(supplySources[o.source] || '')}</small></div>${badge(o.status, supplyStatuses[o.status])}</div>
-    ${o.status !== 'cancelled' ? `<ol class="b2b-steps">${STEPS.map((s, i) => `<li class="${STEPS.indexOf(o.status) >= i ? 'done' : ''}">${supplyStatuses[s]}</li>`).join('')}</ol>` : ''}
+    ${o.status !== 'cancelled' ? `<ol class="fc-steps">${STEPS.map((s, i) => `<li class="${STEPS.indexOf(o.status) >= i ? 'done' : ''}">${supplyStatuses[s]}</li>`).join('')}</ol>` : ''}
     <p class="subtle-note">${o.items.map(i => `${esc(i.name)} × ${i.quantity}`).join('<br>')}</p>
     ${o.tracking ? `<p class="subtle-note">配送：${esc(o.carrier)} / 追跡番号 ${esc(o.tracking)}</p>` : ''}
     <div class="between"><strong>${money(o.total)}</strong><div class="form-actions">${o.status === 'ordered' && !o.invoiceId ? `<button class="btn outline small" data-cancel="${esc(o.id)}">キャンセル</button>` : ''}<button class="btn soft small" data-reorder="${esc(o.id)}">同じ内容で発注</button></div></div></article>`).join('') : empty('発注履歴はまだありません', '「商品一覧」から商品を選んでください。')}`;
