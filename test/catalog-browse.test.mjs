@@ -55,3 +55,11 @@ test('the short description for product lists is optional and limited to 60 char
   assert.equal(productInput({ ...base, summary: '  椿のオイルで、毛先までつややかに。 ' }, ctx).summary, '椿のオイルで、毛先までつややかに。');
   assert.throws(() => productInput({ ...base, summary: 'あ'.repeat(61) }, ctx), /一覧の説明/);
 });
+
+test('browser data from catalogue version 3 picks up the rewritten short descriptions of the sample products', () => {
+  const state = createPlatform(products.slice(0, 6), '2026-10-09T03:00:00.000Z');
+  state.catalogVersion = 3; state.products[0].summary = '以前の短い説明';
+  assert.equal(migrate(state, products), true);
+  assert.equal(state.products[0].summary, products[0].summary);
+  assert.equal(state.catalogVersion, CATALOG_VERSION);
+});

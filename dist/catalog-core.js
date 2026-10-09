@@ -83,7 +83,7 @@ export function applyPriceRow(row, current) {
 export const CONCERN_NAMES = ['ダメージヘア対策', 'エイジングケア', '白髪対策', 'ボリュームアップ', '頭皮ケア', 'カラーケア', 'パーマケア'];
 export const CATEGORY_IDS = { シャンプー: 'shampoo', トリートメント: 'treatment', ヘアオイル: 'hair-oil', ヘアマスク: 'hair-mask', 'ヘアミルク・ミスト': 'hair-milk-mist', スカルプケア: 'scalp-care', ヘアスタイリング: 'hair-styling' };
 // 初期の品ぞろえの版。2：ダミー商品を30点（7カテゴリ・7ブランド）に増やした
-export const CATALOG_VERSION = 3;
+export const CATALOG_VERSION = 4;
 // 版3で作り直した初期商品の写真。以前の既定の写真のままの商品だけ、新しい写真に替える（管理画面で替えた写真はそのまま）
 export const legacyImages = id => [`products/${id}.svg`, 'shampoo.png', 'treatment.png', 'oil.png'];
 export const seedCategories = products => [...new Set(products.map(p => p.category))].map((name, i) => ({ id: CATEGORY_IDS[name] || `category-${i + 1}`, name, sortOrder: i }));

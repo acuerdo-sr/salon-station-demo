@@ -13,7 +13,7 @@
     "stock": 24,
     "image": "products/shampoo-moist.webp",
     "tag": "BEST SELLER",
-    "summary": "しっとり洗い上げ、まとまる髪へ。ダメージが気になる髪に。",
+    "summary": "カラーやアイロンで傷みがちな髪に。しっとりまとまる洗い上がり。補修シャンプー",
     "description": "毎日のヘアケアに。しっとりした洗い上がりをイメージした、サロン向けのデモ商品です。",
     "sku": "SN-SH-050"
   },
@@ -32,7 +32,7 @@
     "stock": 18,
     "image": "products/treatment-repair.webp",
     "tag": "NEW",
-    "summary": "週1回の集中ケアで、指通りのなめらかな髪に。",
+    "summary": "指通りが気になる日のスペシャルケアに。毛先までなめらか。集中補修ヘアマスク",
     "description": "週に一度のスペシャルケアをイメージしたヘアマスク。商品説明・容量・価格はすべて架空です。",
     "sku": "SN-TR-025"
   },
@@ -50,7 +50,7 @@
     "stock": 30,
     "image": "products/oil-smooth.webp",
     "tag": "POPULAR",
-    "summary": "軽いつけ心地で、自然なつやとまとまりを。",
+    "summary": "パサつきが気になる毛先に。べたつかず、自然なつや。洗い流さないヘアオイル",
     "description": "スタイリングの仕上げに使うヘアオイルをイメージしたデモ商品。自然なまとまりをテーマにしています。",
     "sku": "SN-OL-010"
   },
@@ -68,7 +68,7 @@
     "stock": 12,
     "image": "products/shampoo-air.webp",
     "tag": "",
-    "summary": "ふんわり軽い洗い上がり。根元から立ち上がる髪に。",
+    "summary": "ぺたんとしやすい髪に。根元からふんわり軽い洗い上がり。ボリュームシャンプー",
     "description": "軽やかな仕上がりをテーマにしたシャンプーのデモ商品です。モイストタイプとの比較もお試しいただけます。",
     "sku": "SN-SH-051"
   },
@@ -86,7 +86,7 @@
     "stock": 15,
     "image": "products/treatment-daily.webp",
     "tag": "",
-    "summary": "毎日使えるトリートメント。やわらかくまとまる髪へ。",
+    "summary": "毎日のケアを手軽に。やわらかく、まとまりのある髪へ。デイリートリートメント",
     "description": "デイリーケアをイメージしたトリートメント。毎日のサロンワークに寄り添うデモシリーズです。",
     "sku": "SN-TR-026"
   },
@@ -104,7 +104,7 @@
     "stock": 0,
     "image": "products/oil-rich.webp",
     "tag": "",
-    "summary": "乾燥しがちな毛先を、しっとり重めに仕上げる。",
+    "summary": "広がりやすい乾燥毛に。毛先までしっとり重めの仕上がり。洗い流さないヘアオイル",
     "description": "しっとりした質感をテーマにしたヘアオイル。売り切れ時の表示を確認するため、初期在庫は0本です。",
     "sku": "SN-OL-011"
   },
@@ -122,7 +122,7 @@
     "stock": 15,
     "image": "products/sena-mask-deep.webp",
     "tag": "",
-    "summary": "ハイダメージ毛に。濃密なマスクで、しっとりまとまる髪へ。",
+    "summary": "ブリーチを重ねたハイダメージ毛に。濃密に補修し、しっとりまとまる。ヘアマスク",
     "description": "ハイダメージ毛の集中ケアをイメージしたヘアマスク。週1〜2回のスペシャルケア向けのデモ商品です。",
     "sku": "SN-MK-020",
     "dealerId": "sena"
@@ -141,7 +141,7 @@
     "stock": 26,
     "image": "products/sena-milk-heat.webp",
     "tag": "",
-    "summary": "ドライヤー前のひと手間で、熱から髪を守る。",
+    "summary": "ドライヤーやアイロンの前に。熱から髪を守り、なめらかに。洗い流さないヘアミルク",
     "description": "ドライヤー前に使う洗い流さないトリートメントをイメージしたデモ商品です。",
     "sku": "SN-ML-012",
     "dealerId": "sena"
@@ -159,7 +159,7 @@
     "stock": 22,
     "image": "products/botanical-mist.webp",
     "tag": "NEW",
-    "summary": "寝ぐせ直しに。植物のやさしい香りのヘアミスト。",
+    "summary": "朝の寝ぐせ直しに。ひと吹きでまとまり、植物がやさしく香る。ヘアミスト",
     "description": "朝の寝ぐせ直しと、ほのかな香りをテーマにしたヘアミストのデモ商品です。",
     "sku": "SB-MS-015",
     "dealerId": "botanica"
@@ -178,7 +178,7 @@
     "stock": 16,
     "image": "products/botanical-scalp-shampoo.webp",
     "tag": "",
-    "summary": "頭皮をすっきり洗う、植物由来のスカルプシャンプー。",
+    "summary": "頭皮のべたつき・においが気になる方に。すっきり軽やか。スカルプシャンプー",
     "description": "植物由来の成分をイメージした、頭皮をすっきり洗うシャンプーのデモ商品です。",
     "sku": "SB-SH-040",
     "dealerId": "botanica"
@@ -197,7 +197,7 @@
     "stock": 20,
     "image": "products/mizuha-shampoo.webp",
     "tag": "POPULAR",
-    "summary": "和の植物のうるおいで、しっとりやわらかな洗い上がり。",
+    "summary": "乾燥でごわつく髪に。和の植物のうるおいで、やわらかな洗い上がり。シャンプー",
     "description": "和の植物をテーマにした、しっとり洗い上げるシャンプーのデモ商品です。",
     "sku": "MZ-SH-040",
     "dealerId": "sena"
@@ -216,7 +216,7 @@
     "stock": 19,
     "image": "products/mizuha-treatment.webp",
     "tag": "",
-    "summary": "髪にうるおいを与え、しなやかにまとめる。",
+    "summary": "うねり・広がりが気になる髪に。しなやかに、まとまる髪へ。トリートメント",
     "description": "シャンプーと同じシリーズの、まとまりを出すトリートメントのデモ商品です。",
     "sku": "MZ-TR-040",
     "dealerId": "sena"
@@ -235,7 +235,7 @@
     "stock": 9,
     "image": "products/mizuha-camellia-oil.webp",
     "tag": "BEST SELLER",
-    "summary": "椿のオイルで、毛先までつややかに。",
+    "summary": "湿気で広がりやすい日に。毛先まで椿のつや。洗い流さないヘアオイル",
     "description": "椿をテーマにした、毛先までつややかに仕上げるヘアオイルのデモ商品です。",
     "sku": "MZ-OL-008",
     "dealerId": "botanica"
@@ -254,7 +254,7 @@
     "stock": 11,
     "image": "products/mizuha-mask.webp",
     "tag": "",
-    "summary": "ハリ・コシが気になる髪に。濃密なヘアマスク。",
+    "summary": "年齢とともに細くなる髪に。ハリ・コシのある手ざわりへ。濃密ヘアマスク",
     "description": "年齢とともに気になる髪のハリ・コシをテーマにしたヘアマスクのデモ商品です。",
     "sku": "MZ-MK-018",
     "dealerId": "sena"
@@ -273,7 +273,7 @@
     "stock": 17,
     "image": "products/calme-scalp-shampoo.webp",
     "tag": "",
-    "summary": "皮脂やにおいをすっきり。頭皮から整えるシャンプー。",
+    "summary": "皮脂やにおいが気になる頭皮に。すっきり洗い上げる。スカルプシャンプー",
     "description": "頭皮の皮脂やにおいをすっきり洗うことをテーマにしたシャンプーのデモ商品です。",
     "sku": "CS-SH-030",
     "dealerId": "botanica"
@@ -292,7 +292,7 @@
     "stock": 13,
     "image": "products/calme-scalp-serum.webp",
     "tag": "NEW",
-    "summary": "お風呂上がりの頭皮に。すっとなじむ頭皮用美容液。",
+    "summary": "お風呂上がりの頭皮に。すっとなじみ、乾燥を防ぐ。頭皮用美容液",
     "description": "お風呂上がりの頭皮に使う美容液をイメージしたデモ商品です。",
     "sku": "CS-SR-006",
     "dealerId": "botanica"
@@ -310,7 +310,7 @@
     "stock": 8,
     "image": "products/calme-scalp-gel.webp",
     "tag": "",
-    "summary": "シャンプー前に。毛穴の汚れを浮かせる頭皮用ジェル。",
+    "summary": "シャンプー前の2分で。毛穴の汚れを浮かせて落とす。頭皮クレンジングジェル",
     "description": "シャンプー前に使う頭皮用のクレンジングをイメージしたデモ商品です。",
     "sku": "CS-GL-015",
     "dealerId": "botanica"
@@ -329,7 +329,7 @@
     "stock": 21,
     "image": "products/calme-scalp-mist.webp",
     "tag": "",
-    "summary": "ひんやり爽快。汗ばむ季節の頭皮をすっきり。",
+    "summary": "汗ばむ季節や運動のあとに。ひんやり爽快、頭皮すっきり。スカルプミスト",
     "description": "汗ばむ季節の頭皮をすっきり整えるミストをイメージしたデモ商品です。",
     "sku": "CS-MS-012",
     "dealerId": "botanica"
@@ -347,7 +347,7 @@
     "stock": 25,
     "image": "products/noir-wax-soft.webp",
     "tag": "",
-    "summary": "やわらかな束感。パーマのカールを生かす。",
+    "summary": "パーマやくせ毛を生かしたい方に。やわらかな束感をつくる。ソフトワックス",
     "description": "やわらかな束感と、パーマのカールを生かす仕上げをイメージしたワックスのデモ商品です。",
     "sku": "NA-WX-080S",
     "dealerId": "sena"
@@ -363,7 +363,7 @@
     "stock": 23,
     "image": "products/noir-wax-hard.webp",
     "tag": "",
-    "summary": "短い髪をしっかり立ち上げ、形をキープ。",
+    "summary": "ショートヘアをしっかり立ち上げ、夕方まで崩れにくい。ハードワックス",
     "description": "短めの髪をしっかり立ち上げる仕上げをイメージしたワックスのデモ商品です。",
     "sku": "NA-WX-080H",
     "dealerId": "sena"
@@ -381,7 +381,7 @@
     "stock": 14,
     "image": "products/noir-balm.webp",
     "tag": "NEW",
-    "summary": "髪にも手肌にも。自然なつやとまとまりを。",
+    "summary": "髪にも手肌にも使える。濡れたようなつやとまとまり。スタイリングバーム",
     "description": "髪にも手肌にも使えるバームをイメージしたデモ商品です。",
     "sku": "NA-BM-040",
     "dealerId": "sena"
@@ -397,7 +397,7 @@
     "stock": 30,
     "image": "products/noir-spray.webp",
     "tag": "POPULAR",
-    "summary": "仕上げた形を一日キープ。べたつかない。",
+    "summary": "仕上げた形を一日キープ。べたつかず、自然な仕上がり。ヘアスプレー",
     "description": "仕上げた形を一日キープすることをテーマにしたスプレーのデモ商品です。",
     "sku": "NA-SP-180",
     "dealerId": "sena"
@@ -415,7 +415,7 @@
     "stock": 6,
     "image": "products/noir-styling-oil.webp",
     "tag": "",
-    "summary": "濡れたようなつやと、ほどよい束感を。",
+    "summary": "ウェットな質感をつくりたい日に。つやと束感を同時に。スタイリングオイル",
     "description": "濡れたようなつやと束感をつくるスタイリングオイルのデモ商品です。",
     "sku": "NA-OL-100",
     "dealerId": "botanica"
@@ -434,7 +434,7 @@
     "stock": 18,
     "image": "products/haru-shampoo.webp",
     "tag": "",
-    "summary": "やさしい洗い心地と、植物の香り。",
+    "summary": "頭皮へのやさしさを大切にしたい方に。やわらかな泡と植物の香り。シャンプー",
     "description": "やさしい洗い心地と、植物の香りをテーマにしたシャンプーのデモ商品です。",
     "sku": "HO-SH-030",
     "dealerId": "botanica"
@@ -452,7 +452,7 @@
     "stock": 17,
     "image": "products/haru-treatment.webp",
     "tag": "",
-    "summary": "軽やかに仕上がる、オーガニックトリートメント。",
+    "summary": "重くなりたくない方に。軽やかで、指通りなめらか。トリートメント",
     "description": "シャンプーと同じシリーズの、軽やかに仕上げるトリートメントのデモ商品です。",
     "sku": "HO-TR-025",
     "dealerId": "botanica"
@@ -470,7 +470,7 @@
     "stock": 0,
     "image": "products/haru-milk.webp",
     "tag": "",
-    "summary": "乾燥しがちな毛先を、やさしく整えるヘアミルク。",
+    "summary": "乾燥しがちな毛先に。軽いつけ心地で、やさしくまとまる。洗い流さないヘアミルク",
     "description": "毛先の乾燥をやさしく整えるヘアミルクのデモ商品です。入荷待ちの表示を確かめるため、初期在庫は0です。",
     "sku": "HO-ML-010",
     "dealerId": "botanica"
@@ -489,7 +489,7 @@
     "stock": 20,
     "image": "products/irodori-shampoo-purple.webp",
     "tag": "NEW",
-    "summary": "ブリーチ後の黄ばみを抑え、透明感のある髪色に。",
+    "summary": "ブリーチ後の黄ばみが気になる髪に。透明感のある髪色へ。紫のカラーシャンプー",
     "description": "ブリーチ後の黄ばみを抑えることをテーマにした、紫のカラーシャンプーのデモ商品です。",
     "sku": "IC-SH-025P",
     "dealerId": "sena"
@@ -507,7 +507,7 @@
     "stock": 12,
     "image": "products/irodori-shampoo-pink.webp",
     "tag": "",
-    "summary": "ピンク系のカラーを、長く楽しむために。",
+    "summary": "ピンク・レッド系のカラーに。色落ちを抑えて長く楽しむ。カラーシャンプー",
     "description": "ピンク系のヘアカラーを長く楽しむことをテーマにしたカラーシャンプーのデモ商品です。",
     "sku": "IC-SH-025K",
     "dealerId": "sena"
@@ -526,7 +526,7 @@
     "stock": 10,
     "image": "products/irodori-mask.webp",
     "tag": "",
-    "summary": "カラー後の髪色と手ざわりを、しっとり守る。",
+    "summary": "カラー直後の髪に。色もちと手ざわりを、しっとり守る。カラーケアマスク",
     "description": "カラー後の髪の色もちと手ざわりをテーマにしたヘアマスクのデモ商品です。",
     "sku": "IC-MK-020",
     "dealerId": "sena"
@@ -544,7 +544,7 @@
     "stock": 24,
     "image": "products/irodori-mist.webp",
     "tag": "",
-    "summary": "紫外線やドライヤーの熱から、髪色を守るミスト。",
+    "summary": "外出前のひと吹きで。紫外線やドライヤーの熱から髪色を守る。ヘアミスト",
     "description": "紫外線やドライヤーの熱から髪色を守ることをテーマにしたミストのデモ商品です。",
     "sku": "IC-MS-012",
     "dealerId": "sena"

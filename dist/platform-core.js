@@ -103,8 +103,10 @@ export function migrate(state,catalog){
   for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';delete o.payment;changed=true;}
   // 品ぞろえの版2：以前のデータに、まだない初期商品と、そのカテゴリを足す（登録済みの商品・価格は変えない）
   // 版3：一覧の短い説明（summary）と、作り直した初期商品の写真（以前の既定の写真のままの商品だけ）
+  // 版4：初期商品の短い説明を書き直した。版3は公開から間もなく書き直したため、版3のデータは初期商品の説明を新しいものに替える
   if((state.catalogVersion||1)<CATALOG_VERSION&&Array.isArray(state.products)&&Array.isArray(state.categories)){
-    for(const p of state.products){const src=(catalog||[]).find(c=>c.id===p.id);if(p.summary===undefined)p.summary=src?.summary||'';if(src&&legacyImages(p.id).includes(p.image))p.image=src.image;}
+    const from=state.catalogVersion||1;
+    for(const p of state.products){const src=(catalog||[]).find(c=>c.id===p.id);if(p.summary===undefined||(from===3&&src))p.summary=src?.summary||p.summary||'';if(src&&legacyImages(p.id).includes(p.image))p.image=src.image;}
     for(const c of catalog||[])if(!state.products.some(p=>p.id===c.id))state.products.push(seedProduct(c));
     for(const name of new Set((catalog||[]).map(c=>c.category)))if(!state.categories.some(x=>x.name===name))state.categories.push({id:CATEGORY_IDS[name]||newCategoryId(),name,sortOrder:state.categories.length});
     state.catalogVersion=CATALOG_VERSION;changed=true;
