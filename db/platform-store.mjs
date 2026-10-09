@@ -2,7 +2,7 @@
 // 入力検証・送料・状態遷移・精算などの規則は platform-core.js の関数を共有する。
 import { randomBytes } from 'node:crypto';
 import {
-  fail, required, int, salonInput, staffList, staffNameInput, staffMoveInput, staffRoute, staffStatsOf, newStaffId, MAX_STAFF, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
+  fail, required, int, salonInput, staffList, staffSummary, staffNameInput, staffMoveInput, staffRoute, staffStatsOf, newStaffId, MAX_STAFF, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
   settlement, requireOperator, allowedOrder, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
   addressInput, sortAddresses, addressView, cardView, sortCards, shipmentLabel, MAX_ADDRESSES,
@@ -603,9 +603,13 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     }
     // 担当スタッフの追加・名前の変更・並び替え・削除（ブラウザ版と同じ規則）。削除したスタッフは履歴のため無効にして残す
     const staffAction = staffRoute(route);
-    if (staffAction && ['POST', 'PATCH', 'DELETE'].includes(method)) {
+    if (staffAction && ['GET', 'POST', 'PATCH', 'DELETE'].includes(method)) {
       const op = requireOperator(actor, ['admin', 'salon']), salon = await salonById(q, staffAction[1]);
       if (op.role === 'salon' && op.salonId !== salon.id) fail('他店舗のスタッフは編集できません。', 403);
+      if (method === 'GET') {
+        if (staffAction[2]) fail('この操作は利用できません。', 404);
+        return staffSummary(salon.staff, (await q.all('SELECT staff_id FROM members WHERE salon_id=?', [salon.id])).map(m => m.staff_id || ''));
+      }
       const staffOf = async () => (await salonById(q, salon.id)).staff;
       if (method === 'POST') {
         if (staffAction[2]) fail('この操作は利用できません。', 404);

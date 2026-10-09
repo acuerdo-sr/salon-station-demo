@@ -36,6 +36,7 @@ export const staffStatsOf=members=>Object.values(members.reduce((a,m)=>{if(!m.sa
 export const newStaffId=()=>'st-'+crypto.randomUUID().replace(/-/g,'').slice(0,8);
 export function staffNameInput(value,staff,exceptId=''){const name=String(value??'').trim();if(!name||name.length>40)fail('スタッフ名を入力し、40文字以内にしてください。');if(staff.some(s=>s.name===name&&s.id!==exceptId))fail('同じ名前のスタッフが登録されています。',409);return name;}
 export const staffMoveInput=v=>v===-1||v===1?v:fail('並び順を確認してください。');
+export function staffSummary(staff,memberStaffIds){const list=staff.map(s=>({id:s.id,name:s.name,members:memberStaffIds.filter(id=>id===s.id).length}));return {staff:list,unassigned:memberStaffIds.length-list.reduce((n,s)=>n+s.members,0)};}
 export const staffRoute=route=>route.match(/^\/admin\/salons\/([^/]+)\/staff(?:\/([^/]+))?$/);
 export function staffList(value,existing=[]){
   const names=Array.isArray(value)?value:String(value??'').split(/[\n,、，]/);
@@ -373,9 +374,11 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   // 担当スタッフの追加・名前の変更・並び替え・削除。削除するスタッフの担当のお客様は transferTo のスタッフ（空なら指名なし）へ引き継ぐ。
   // 過去の注文には注文時の担当者名が残る
   const staffAction=staffRoute(route);
-  if(staffAction&&['POST','PATCH','DELETE'].includes(method)){
+  if(staffAction&&['GET','POST','PATCH','DELETE'].includes(method)){
     const op=requireOperator(actor,['admin','salon']),salon=salonFor(state,staffAction[1]);
     if(op.role==='salon'&&op.salonId!==salon.id)fail('他店舗のスタッフは編集できません。',403);
+    // 一覧：スタッフごとの担当のお客様の人数だけを返す（お客様の情報は含めない）。いないスタッフを指していた会員は指名なしに数える
+    if(method==='GET'){if(staffAction[2])fail('この操作は利用できません。',404);return staffSummary(salon.staff,state.profiles.filter(p=>p.salonId===salon.id).map(p=>p.staffId||''));}
     if(method==='POST'){if(staffAction[2])fail('この操作は利用できません。',404);if(salon.staff.length>=MAX_STAFF)fail(`スタッフは${MAX_STAFF}名まで登録できます。`,409);const s={id:newStaffId(),name:staffNameInput(input?.name,salon.staff)};salon.staff.push(s);log(state,op,`スタッフを追加（${s.name}）`,salon.id,now);return clone(salon.staff);}
     const s=salon.staff.find(x=>x.id===staffAction[2]);if(!s)fail('スタッフが見つかりません。',404);
     if(method==='PATCH'){

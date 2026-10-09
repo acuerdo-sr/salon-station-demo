@@ -30,6 +30,11 @@ for (const [name, create] of engines('2026-10-06T03:00:00.000Z')) {
       await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: miku.id }, hanako);
       const before = await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: home }, taro);
       assert.equal(before.staffName, 'MIKU');
+      const summary = await e.call(url(), 'GET', undefined, salonOp);
+      assert.deepEqual(summary.staff.map(s => [s.name, s.members]).find(([n]) => n === 'MIKU'), ['MIKU', 2], '発注画面の一覧：担当のお客様の人数');
+      assert.ok(summary.unassigned >= 0 && !JSON.stringify(summary).includes('kojin'), 'お客様の情報は含めない');
+      await assert.rejects(e.call('/admin/salons/atelier/staff', 'GET', undefined, salonOp), /他店舗/);
+      await assert.rejects(e.call(url(), 'GET', undefined, sena), /権限/);
       const stats = (await e.call('/admin/snapshot', 'GET', undefined, salonOp)).staffStats;
       assert.equal(stats.find(x => x.salonId === 'lumiere' && x.staffId === miku.id).members, 2, '担当のお客様の人数');
       assert.ok(!stats.some(x => x.salonId === 'atelier'), '美容室には他店舗の人数を見せない');

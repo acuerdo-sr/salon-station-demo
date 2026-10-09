@@ -6,7 +6,7 @@ import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, form
 import { lineConfig, liffIdToken } from './line-login.js';
 import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js';
 
-let operator = null, ws = null, tab = 'order', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
+let operator = null, ws = null, staff = null, tab = 'order', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
 const today = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const productOf = id => ws.products.find(p => p.id === id);
 const cartLines = () => Object.entries(cart).map(([id, quantity]) => ({ ...productOf(id), quantity })).filter(p => p.id);
@@ -24,11 +24,11 @@ function loginView(message = '') {
 }
 function shell() {
   const t = cartTotal();
-  const tabs = [['order', '発注'], ['ec', '店販EC'], ['history', '履歴'], ['subscriptions', '定期発注'], ['invoices', '請求書']];
+  const tabs = [['order', '発注'], ['ec', '店販EC'], ['history', '履歴'], ['subscriptions', '定期発注'], ['invoices', '請求書'], ['staff', 'スタッフ']];
   $('#app').innerHTML = `<header class="order-header"><div><b>${esc(ws.salon.name)}</b><small>${esc(operator.name)}</small></div><button class="icon-btn" data-logout aria-label="ログアウト">${icon('logout')}</button></header>
     ${lineToken && !operator.lineLinked ? `<div class="notice order-banner">このLINEアカウントと連携すると、次回からLINEで開くだけでログインできます。<button class="btn line small" data-line-link>LINEと連携</button></div>` : ''}
     <nav class="order-tabs" aria-label="発注メニュー">${tabs.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-tab="${id}">${label}${id === 'order' && t.count ? `<b>${t.count}</b>` : ''}</button>`).join('')}</nav>
-    <main class="order-main">${tab === 'order' ? orderTab() : tab === 'ec' ? ecTab() : tab === 'history' ? historyTab() : tab === 'subscriptions' ? subscriptionsTab() : invoicesTab()}</main>
+    <main class="order-main">${tab === 'order' ? orderTab() : tab === 'ec' ? ecTab() : tab === 'history' ? historyTab() : tab === 'subscriptions' ? subscriptionsTab() : tab === 'staff' ? staffTab() : invoicesTab()}</main>
     ${tab === 'order' && t.count ? `<div class="order-cartbar"><div><small>${t.count}点${t.shipping ? ` / 送料 ${money(t.shipping)}` : ' / 送料無料'}</small><strong>${money(t.total)}</strong></div><button class="btn primary" data-review>発注内容を確認 ${icon('arrow')}</button></div>` : ''}`;
 }
 // ---- 店販EC：貴店を選んでいるお客様がECで買った分の集計（お客様の名前は受け取らない）
@@ -56,6 +56,18 @@ function orderTab() {
   return `${ecGlance()}${s.length ? `<section class="order-section"><h2>発注のご提案</h2><p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${s.map(x => `<article class="suggest-card"><div><b>${esc(x.name)}</b><small>いつも約${x.averageDays}日ごと・前回 ${esc(x.lastOrderedOn.slice(5).replace('-', '/'))}（${x.daysSince}日前）</small></div><button class="btn soft small" data-suggest="${esc(x.productId)}" data-qty="${x.quantity}">${x.quantity}点を追加</button></article>`).join('')}</section>` : ''}
     <section class="order-section"><h2>商品</h2><p class="subtle-note">卸価格（税込）です。11,000円以上で送料無料。</p>
     ${ws.products.map(p => { const q = cart[p.id] || 0; return `<article class="supply-item"><img src="${esc(imageUrl(p.image))}" alt=""><div class="supply-copy"><b>${esc(p.name)}</b><small>${esc(p.size)} / 在庫 ${p.stock}</small><span>${money(p.wholesalePrice)}<small> 卸価格・税込（売価 ${money(p.price)}）</small></span></div><div class="qty-control"><button data-step="${esc(p.id)}" data-delta="-1" ${q ? '' : 'disabled'} aria-label="${esc(p.name)}を1点減らす">−</button><span>${q}</span><button data-step="${esc(p.id)}" data-delta="1" ${q >= p.stock ? 'disabled' : ''} aria-label="${esc(p.name)}を1点増やす">＋</button></div></article>`; }).join('')}</section>`;
+}
+// ---- 担当スタッフ：お客様が会員登録・マイページで選ぶスタッフの追加・名前の変更・並び替え・削除（管理画面の「担当スタッフ」と同じ操作）
+const staffUrl = (id = '') => `/admin/salons/${encodeURIComponent(operator.salonId)}/staff${id ? '/' + encodeURIComponent(id) : ''}`;
+async function loadStaff() { staff = await platform(staffUrl()); }
+const staffOf = id => staff.staff.find(s => s.id === id);
+function staffTab() {
+  const list = staff?.staff || [];
+  return `<p class="notice">お客様が会員登録・マイページで選ぶ「担当スタッフ」です。上から順にお客様の選択肢に表示されます。名前を変えても、担当のお客様はそのまま引き継がれます。</p>
+    <form id="staff-form" class="supply-order staff-add"><label>新しいスタッフの名前<input name="name" maxlength="40" required placeholder="例：HARUKA" autocomplete="off"></label><button class="btn primary" type="submit">追加する</button></form>
+    ${list.length ? list.map((s, i) => `<article class="supply-order staff-row"><div class="between"><div><b>${esc(s.name)}</b><small>担当のお客様 ${s.members}人</small></div><div class="staff-order"><button class="icon-btn" data-staff-move="${esc(s.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="${esc(s.name)}を上へ">↑</button><button class="icon-btn" data-staff-move="${esc(s.id)}" data-dir="1" ${i === list.length - 1 ? 'disabled' : ''} aria-label="${esc(s.name)}を下へ">↓</button></div></div>
+      <div class="form-actions"><button class="btn outline small" data-staff-rename="${esc(s.id)}">名前を変更</button><button class="btn outline small" data-staff-delete="${esc(s.id)}">削除</button></div></article>`).join('') : empty('スタッフが登録されていません', '上の欄から追加してください。')}
+    <p class="subtle-note">指名なしのお客様：${staff?.unassigned ?? 0}人。スタッフを削除しても、過去の注文には注文時の担当者名が残ります。</p>`;
 }
 function historyTab() {
   return ws.orders.length ? ws.orders.map(o => `<article class="supply-order"><div class="between"><div><b>${esc(o.id)}</b><small>${date(o.createdAt, true)}・${esc(supplySources[o.source] || '')}</small></div>${badge(o.status, supplyStatuses[o.status])}</div>
@@ -97,7 +109,10 @@ async function start() {
 document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   try {
-    if (b.dataset.tab) { tab = b.dataset.tab; if (tab !== 'order') await load(); shell(); scrollTo({ top: 0 }); }
+    if (b.dataset.tab) { tab = b.dataset.tab; if (tab === 'staff') await loadStaff(); else if (tab !== 'order') await load(); shell(); scrollTo({ top: 0 }); }
+    if (b.dataset.staffMove) { await platform(staffUrl(b.dataset.staffMove), 'PATCH', { move: Number(b.dataset.dir) }); await loadStaff(); shell(); }
+    if (b.dataset.staffRename) { const s = staffOf(b.dataset.staffRename); modal('スタッフ名の変更', `<form id="staff-rename-form" data-staff-id="${esc(s.id)}" class="stack"><label>スタッフ名<input name="name" value="${esc(s.name)}" maxlength="40" required></label><p class="subtle-note">担当のお客様（${s.members}人）はそのまま引き継がれます。過去の注文の担当者名は変わりません。</p><div id="form-error" class="error" role="alert"></div><button class="btn primary" type="submit">変更する</button></form>`); }
+    if (b.dataset.staffDelete) { const s = staffOf(b.dataset.staffDelete), others = staff.staff.filter(x => x.id !== s.id); modal('スタッフの削除', `<form id="staff-delete-form" data-staff-id="${esc(s.id)}" class="stack"><p>「${esc(s.name)}」を担当スタッフから削除します。お客様の選択肢にも表示されなくなります。</p>${s.members ? `<label>担当のお客様 ${s.members}人の引き継ぎ先<select name="transferTo"><option value="">指名なし</option>${others.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label>` : '<p class="subtle-note">担当のお客様はいません。</p>'}<p class="subtle-note">過去の注文には、注文時の担当者名が残ります。お客様はマイページで担当スタッフを選び直せます。</p><div id="form-error" class="error" role="alert"></div><button class="btn danger" type="submit">削除する</button></form>`); }
     if (b.hasAttribute('data-line-demo')) { b.disabled = true; operator = (await platform('/operator/line-demo', 'POST', {})).operator; await load(); shell(); toast('LINEからログインしました（デモ）。'); }
     if (b.hasAttribute('data-line-link')) { operator = (await platform('/operator/line', 'POST', { idToken: lineToken })).operator; shell(); toast('LINEと連携しました。次回からLINEで開くだけでログインできます。'); }
     if (b.hasAttribute('data-logout')) { await platform('/operator/logout', 'POST', {}); setCart({}); loginView(); }
@@ -114,10 +129,13 @@ document.addEventListener('click', async e => {
   } catch (error) { formError(error); b.disabled = false; }
 });
 document.addEventListener('submit', async e => {
-  const form = e.target; if (!['login-form', 'supply-form', 'subscription-form'].includes(form.id)) return;
+  const form = e.target; if (!['login-form', 'supply-form', 'subscription-form', 'staff-form', 'staff-rename-form', 'staff-delete-form'].includes(form.id)) return;
   e.preventDefault(); const b = form.querySelector('[type=submit]'); b.disabled = true; const f = Object.fromEntries(new FormData(form));
   try {
     if (form.id === 'login-form') { const { operator: op } = await platform('/operator/login', 'POST', f); if (op.role !== 'salon') { await platform('/operator/logout', 'POST', {}); throw Error('この画面は加盟店（美容室）のアカウント専用です。'); } operator = op; await load(); shell(); return; }
+    if (form.id === 'staff-form') { await platform(staffUrl(), 'POST', { name: f.name }); await loadStaff(); shell(); toast(`${f.name.trim()} を追加しました。お客様の選択肢に表示されます。`); return; }
+    if (form.id === 'staff-rename-form') { await platform(staffUrl(form.dataset.staffId), 'PATCH', { name: f.name }); await loadStaff(); closeModal(); shell(); toast('スタッフ名を変更しました。'); return; }
+    if (form.id === 'staff-delete-form') { await platform(staffUrl(form.dataset.staffId), 'DELETE', { transferTo: f.transferTo || '' }); await loadStaff(); closeModal(); shell(); toast('スタッフを削除しました。'); return; }
     const items = cartLines().map(p => ({ id: p.id, quantity: p.quantity, price: p.wholesalePrice }));
     if (form.id === 'supply-form') {
       if (busy) return; busy = true;
