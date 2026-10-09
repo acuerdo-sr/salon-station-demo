@@ -126,6 +126,10 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
     await tx.run(`INSERT INTO invoices (id, salon_id, billing_month, bill_to_name, bill_to_address, salon_name, issued_on, due_on, order_count, subtotal, tax_total, total, status, paid_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [inv.id, inv.salonId, inv.month, inv.billTo?.name || '', inv.billTo?.address || '', inv.salonName, inv.issuedOn, inv.dueOn, inv.orderCount, inv.subtotal, inv.taxTotal, inv.total, inv.status, inv.paidAt || null, inv.createdAt || now, now]);
   }
+  for (const [salonId, ids] of Object.entries(state.supplyFavorites || {})) {
+    if (!salonIds.has(salonId)) continue;
+    for (const [i, productId] of ids.entries()) if (products.some(p => p.id === productId)) await tx.run('INSERT INTO supply_favorites (salon_id, product_id, created_at) VALUES (?, ?, ?)', [salonId, productId, new Date(Date.parse(now) + i).toISOString()]);
+  }
   // 採番・更新番号
   const seq = Math.max(state.salonSeq ?? 0, (state.salons || []).length, ...(state.salons || []).map(s => Number(/^S(\d+)$/.exec(s.id)?.[1] || 0)));
   await tx.run('INSERT INTO counters (name, value) VALUES (?, ?)', ['salon_seq', seq]);

@@ -92,6 +92,12 @@ CREATE TABLE IF NOT EXISTS cart_items (
   PRIMARY KEY (member_id, product_id), CONSTRAINT cart_items_quantity CHECK (quantity BETWEEN 1 AND 99),
   FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE, FOREIGN KEY (product_id) REFERENCES products(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+-- 加盟店のお気に入り（いつもの商品）
+CREATE TABLE IF NOT EXISTS supply_favorites (
+  salon_id VARCHAR(20) NOT NULL, product_id VARCHAR(40) NOT NULL, created_at VARCHAR(30) NOT NULL,
+  PRIMARY KEY (salon_id, product_id),
+  FOREIGN KEY (salon_id) REFERENCES salons(id), FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS favorites (
   member_id VARCHAR(40) NOT NULL, product_id VARCHAR(40) NOT NULL, created_at VARCHAR(30) NOT NULL,
   PRIMARY KEY (member_id, product_id),

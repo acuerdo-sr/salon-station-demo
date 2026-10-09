@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS cart_items (
   member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, product_id TEXT NOT NULL REFERENCES products(id),
   quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 99), updated_at TEXT NOT NULL,
   PRIMARY KEY (member_id, product_id));
+-- 加盟店のお気に入り（いつもの商品）
+CREATE TABLE IF NOT EXISTS supply_favorites (
+  salon_id TEXT NOT NULL REFERENCES salons(id), product_id TEXT NOT NULL REFERENCES products(id),
+  created_at TEXT NOT NULL, PRIMARY KEY (salon_id, product_id));
 CREATE TABLE IF NOT EXISTS favorites (
   member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, product_id TEXT NOT NULL REFERENCES products(id),
   created_at TEXT NOT NULL, PRIMARY KEY (member_id, product_id));

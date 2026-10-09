@@ -2,7 +2,7 @@
 import { fail, optional, requireOperator, jst, includedTax, requestKeyOf, validateTracking } from '../dist/platform-core.js';
 import {
   supplyStatuses, SUPPLY_TRANSITIONS, supplyIntervals, ISSUER, supplyOrderId, subscriptionId, invoiceId, invoiceDueOn, salonAddress,
-  nextRunOn, addDays, supplyLines, supplyTotals, supplySource, subscriptionInput, closableMonth, supplySuggestions, ecSummary, monthBefore,
+  nextRunOn, addDays, supplyLines, supplyTotals, supplySource, subscriptionInput, closableMonth, supplySuggestions, ecSummary, monthBefore, supplyFavoritesInput,
 } from '../dist/supply-core.js';
 
 const num = value => Number(value || 0);
@@ -65,13 +65,14 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     const sold = await q.all(`SELECT o.member_id, o.subtotal, o.fee, o.ordered_on, (SELECT COALESCE(SUM(i.unit_cost*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS purchase FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active}`, [salon.id, from, to]);
     const items = await q.all(`SELECT i.product_id, MAX(i.name) AS name, SUM(i.quantity) AS quantity, SUM(i.unit_price*i.quantity) AS sales FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active} GROUP BY i.product_id`, [salon.id, `${month}-01`, to]);
     const [stats] = await customerStats(q, [{ id: salon.id, name: salon.name }], now);
-    const shown = products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }));
+    const shown = products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '' }));
+    const favorites = (await q.all('SELECT product_id FROM supply_favorites WHERE salon_id=? ORDER BY created_at, product_id', [salon.id])).map(r => r.product_id).filter(id => shown.some(p => p.id === id));
     const ec = ecSummary({ month, products: shown, members: { total: stats.members, newThisMonth: stats.newThisMonth, lineLinked: stats.lineLinked },
       orders: sold.map(o => ({ month: o.ordered_on.slice(0, 7), memberId: o.member_id, subtotal: num(o.subtotal), purchase: num(o.purchase), fee: num(o.fee) })),
       items: items.map(i => ({ productId: i.product_id, name: i.name, quantity: num(i.quantity), sales: num(i.sales) })) });
     return {
       salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: num(salon.fee_rate) },
-      products: shown, ec,
+      products: shown, ec, favorites,
       orders: await loadSupplyOrders(q, 'salon_id=?', [salon.id], 50), subscriptions: await loadSubscriptions(q, 'salon_id=?', [salon.id]),
       suggestions: supplySuggestions(history, products, today), invoices: await loadInvoices(q, 'salon_id=?', [salon.id]), issuer: { ...ISSUER },
     };
@@ -120,6 +121,13 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     async handle(q, route, method, input, actor, now, effects) {
       const today = jst(now).slice(0, 10);
       if (route === '/supply' && method === 'GET') return workspace(q, requireOperator(actor, ['salon']), now);
+      // 加盟店のお気に入り（いつもの商品）を入れ替える
+      if (route === '/supply/favorites' && method === 'PUT') {
+        const op = requireOperator(actor, ['salon']), enabled = (await supplyProducts(q)).filter(p => p.enabled), ids = supplyFavoritesInput(input, id => enabled.some(p => p.id === id));
+        await q.run('DELETE FROM supply_favorites WHERE salon_id=?', [op.salonId]);
+        for (const [i, productId] of ids.entries()) await q.run('INSERT INTO supply_favorites (salon_id, product_id, created_at) VALUES (?, ?, ?)', [op.salonId, productId, new Date(Date.parse(now) + i).toISOString()]);
+        return { ids };
+      }
       if (route === '/supply/orders' && method === 'POST') {
         const op = requireOperator(actor, ['salon']), key = requestKeyOf(input);
         return supplyById(q, await placeSupply(q, { key, lines: products => supplyLines(input, products), note: optional(input?.note, 200), source: supplySource(input?.source) }, op, op.salonId, now, effects));

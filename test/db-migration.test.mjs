@@ -123,7 +123,7 @@ test('a database created by the previous version gains wholesale prices, operato
     assert.ok((await db.tableColumns('operators')).includes('line_id'));
     for (const table of ['supply_orders', 'supply_order_items', 'supply_subscriptions', 'supply_subscription_items', 'invoices']) assert.equal(await db.tableExists(table), true, table);
     assert.equal(Number((await db.get("SELECT wholesale_price FROM products WHERE id='shampoo-moist'")).wholesale_price), 1859);
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '5');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '6');
     assert.ok((await db.tableColumns('members')).includes('privacy_version'));
     const salonOp = { operator: demoOperators[1] }, ws = await store.request('/supply', 'GET', undefined, salonOp, now);
     assert.deepEqual(ws.orders, []);

@@ -44,6 +44,22 @@ export function supplyTotals(lines) {
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0), shipping = shippingFor(subtotal);
   return { subtotal, shipping, total: subtotal + shipping, taxTotal: includedTax(subtotal + shipping) };
 }
+// 在庫の表示（欠品の確認）。残り10点以下は「残りわずか」
+export const stockState = stock => stock <= 0 ? { code: 'out', label: '欠品中' } : stock <= 10 ? { code: 'low', label: `残りわずか（${stock}点）` } : { code: 'ok', label: '在庫あり' };
+// 出荷予定（納期の目安）：平日15時までのご注文は当日出荷、それ以降と土日は次の平日。欠品中は入荷後
+export function shipEstimate(stock, nowIso = new Date().toISOString()) {
+  if (stock <= 0) return { code: 'wait', label: '入荷後に出荷' };
+  const jstNow = new Date(Date.parse(nowIso) + 9 * 3600000), weekday = d => d.getUTCDay() !== 0 && d.getUTCDay() !== 6;
+  if (weekday(jstNow) && jstNow.getUTCHours() < 15) return { code: 'today', label: '本日出荷' };
+  const d = new Date(jstNow); do d.setUTCDate(d.getUTCDate() + 1); while (!weekday(d));
+  return { code: 'next', label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}（${'日月火水木金土'[d.getUTCDay()]}）出荷` };
+}
+// 加盟店のお気に入り（いつもの商品）。200件まで、登録済みの商品だけ
+export function supplyFavoritesInput(input, exists) {
+  const ids = Array.isArray(input?.ids) ? input.ids : fail('お気に入りの形式が正しくありません。');
+  if (ids.length > 200) fail('お気に入りは200件までです。');
+  return [...new Set(ids.filter(id => typeof id === 'string' && exists(id)))];
+}
 export const supplySource = value => Object.hasOwn(supplySources, String(value)) && value !== 'subscription' ? value : 'manual';
 export function subscriptionInput(input, products, today) {
   if (!Object.hasOwn(supplyIntervals, String(input?.interval))) fail('発注の間隔を選んでください。');
@@ -154,7 +170,7 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
     const op = requireOperator(actor, ['salon']), salon = state.salons.find(s => s.id === op.salonId);
     const own = state.supplyOrders.filter(o => o.salonId === op.salonId);
     const history = own.filter(o => o.status !== 'cancelled').flatMap(o => o.items.map(i => ({ productId: i.id, orderedOn: o.orderedOn, quantity: i.quantity })));
-    const products = state.products.filter(p => p.enabled).map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock }));
+    const products = state.products.filter(p => p.enabled).map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '' }));
     // 店販EC（今月・前月）。お客様の情報は渡さず、集計値だけを渡す
     const month = jst(now).slice(0, 7), monthOf = o => jst(o.createdAt).slice(0, 7);
     const sold = state.orders.filter(o => o.salonId === salon.id && !['cancelled', 'returned'].includes(o.status) && [month, monthBefore(month)].includes(monthOf(o)));
@@ -164,10 +180,15 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
       items: sold.filter(o => monthOf(o) === month).flatMap(o => o.items.map(i => ({ productId: i.id, name: i.name, quantity: i.quantity, sales: i.price * i.quantity }))) });
     return {
       salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: salon.feeRate },
-      products, ec,
+      products, ec, favorites: (state.supplyFavorites?.[salon.id] || []).filter(id => products.some(p => p.id === id)),
       orders: own.slice(0, 50).map(supplyView), subscriptions: clone(state.supplySubscriptions.filter(s => s.salonId === op.salonId)),
       suggestions: supplySuggestions(history, state.products, today), invoices: state.invoices.filter(i => i.salonId === op.salonId).map(invoiceSummary), issuer: { ...ISSUER },
     };
+  }
+  if (route === '/supply/favorites' && method === 'PUT') {
+    const op = requireOperator(actor, ['salon']), ids = supplyFavoritesInput(input, id => state.products.some(p => p.id === id && p.enabled));
+    state.supplyFavorites ??= {}; state.supplyFavorites[op.salonId] = ids;
+    return { ids: [...ids] };
   }
   if (route === '/supply/orders' && method === 'POST') {
     const op = requireOperator(actor, ['salon']), key = requestKeyOf(input);

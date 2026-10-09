@@ -27,10 +27,10 @@ const num = value => Number(value || 0);
 const marks = list => list.map(() => '?').join(',');
 // 変更を伴わない処理と、全画面の再読み込みを促さない処理（カート・お気に入り・住所録・支払方法・出力の記録）
 const READ_ONLY = new Set(['/quote', '/admin/sales']);
-const QUIET = new Set(['/cart', '/favorites', '/admin/exports', '/admin/shipping-csv']);
+const QUIET = new Set(['/cart', '/favorites', '/supply/favorites', '/admin/exports', '/admin/shipping-csv']);
 const quiet = route => QUIET.has(route) || /^\/(addresses|payment-methods)(\/|$)/.test(route);
 const SNAPSHOT_LIMIT = 1000;
-export const SCHEMA_VERSION = '5';
+export const SCHEMA_VERSION = '6';
 const KEY_CHECK = 'salon-station:key-check';
 // アクセス記録は追記のみ（SQLite）。MySQL ではアプリ用ユーザーに UPDATE / DELETE の権限を与えない（db/grants.mysql.sql）。
 const APPEND_ONLY_SQLITE = `CREATE TRIGGER IF NOT EXISTS data_access_logs_no_update BEFORE UPDATE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は変更できません'); END;
@@ -661,6 +661,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (num(used.orders) || num(used.members)) fail('受注または会員が紐付いている店舗は削除できません。「新しい注文を受け付ける」を外して休止してください。', 409);
       if (num(used.operators)) fail('管理アカウントが紐付いている店舗は削除できません。', 409);
       await q.run('DELETE FROM staff WHERE salon_id=?', [salon.id]);
+      await q.run('DELETE FROM supply_favorites WHERE salon_id=?', [salon.id]);
       await q.run('DELETE FROM salons WHERE id=?', [salon.id]);
       await audit(q, op, '店舗を削除', salon.id, now);
       return { deleted: salon.id };

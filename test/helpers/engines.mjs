@@ -7,7 +7,7 @@ import { createSqliteAdapter, createMysqlAdapter } from '../../db/adapter.mjs';
 import { createPlatformStore } from '../../db/platform-store.mjs';
 import { createFieldCrypto } from '../../db/crypto.mjs';
 
-export const TABLES = ['mail_outbox', 'password_resets', 'member_cards', 'data_access_logs', 'supply_subscription_items', 'supply_subscriptions', 'supply_order_items', 'invoices', 'supply_orders', 'notifications', 'audit_logs', 'stock_movements', 'refunds', 'payments', 'order_events', 'order_items', 'purchase_orders', 'orders', 'favorites', 'cart_items', 'operator_sessions', 'operators', 'member_addresses', 'member_sessions', 'members', 'product_concerns', 'products', 'concerns', 'categories', 'staff', 'salons', 'dealers', 'counters', 'app_meta'];
+export const TABLES = ['mail_outbox', 'password_resets', 'member_cards', 'data_access_logs', 'supply_subscription_items', 'supply_subscriptions', 'supply_order_items', 'invoices', 'supply_orders', 'notifications', 'audit_logs', 'stock_movements', 'refunds', 'payments', 'order_events', 'order_items', 'purchase_orders', 'orders', 'favorites', 'supply_favorites', 'cart_items', 'operator_sessions', 'operators', 'member_addresses', 'member_sessions', 'members', 'product_concerns', 'products', 'concerns', 'categories', 'staff', 'salons', 'dealers', 'counters', 'app_meta'];
 
 // 会員マスタのフリガナは必須（注文時に確認する）
 export const KANA = 'デモ ハナコ';

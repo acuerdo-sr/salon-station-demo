@@ -33,7 +33,7 @@ export async function platform(route,method='GET',input){
     // 個人情報を含む画面を開いた記録（アクセス記録）は、読み出しでも保存する
     if(state.accessLogs?.[0]?.id!==lastAccess)raw=null;
     // 変更を伴う処理は保存する。カート・お気に入り・出力の記録は他の画面の再読み込みを促さない（更新番号を上げない）。
-    const readOnly=method==='GET'||['/quote','/admin/sales'].includes(route),quiet=['/cart','/favorites','/admin/exports','/admin/shipping-csv'].includes(route)||/^\/(addresses|payment-methods)(\/|$)/.test(route);
+    const readOnly=method==='GET'||['/quote','/admin/sales'].includes(route),quiet=['/cart','/favorites','/supply/favorites','/admin/exports','/admin/shipping-csv'].includes(route)||/^\/(addresses|payment-methods)(\/|$)/.test(route);
     if(!raw||!readOnly){if(!readOnly&&!quiet)state.revision++;try{localStorage.setItem(key,JSON.stringify(state));}catch{throw Error('保存できません。ブラウザの保存設定を確認してください。');}}
     return result;
   };

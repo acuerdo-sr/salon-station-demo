@@ -208,7 +208,7 @@ test('sqlite: upgrading a version-3 database encrypts existing customer data and
     db = await createSqliteAdapter(file);
     const ctx = await encryptedStore(db);
     assert.ok((await db.tableColumns('members')).includes('email_index'));
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '5');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '6');
     assert.ok((await db.all('SELECT email, name FROM members')).every(m => isEncrypted(m.email) && isEncrypted(m.name)));
     const login = await ctx.auth.request('/api/auth/login', 'POST', { email: 'kojin-taro@example.test', password: 'Demo-Member-2026' }, fakeReq(), fakeRes());
     assert.equal(login.member.id, taro.id); assert.equal(login.member.name, secret.name);
@@ -227,7 +227,7 @@ test('maintenance commands: db:migrate brings the database up to date; customer:
     const missing = script('customer-lookup', ['--ref', 'M-00000000', '--by', '保守 担当', '--purpose', 'お問い合わせ対応']);
     assert.equal(missing.status, 1); assert.match(missing.stderr, /見つかりません/); assert.equal(existsSync(path.join(dir, 'encryption.key')), false);
     const migrated = script('db-migrate');
-    assert.equal(migrated.status, 0, migrated.stderr); assert.match(migrated.stdout, /最新の版（5）/);
+    assert.equal(migrated.status, 0, migrated.stderr); assert.match(migrated.stdout, /最新の版（6）/);
     const db = await createSqliteAdapter(path.join(dir, 'shop.sqlite'));
     const ctx = await encryptedStore(db, loadDataKey({ dataDir: dir }).key), taro = await registerCustomer(ctx);
     await db.close();
