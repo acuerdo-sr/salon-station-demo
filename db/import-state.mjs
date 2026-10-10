@@ -31,9 +31,9 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   const staffIds = new Set();
   for (const [i, s] of (state.salons || []).entries()) {
     const created = at(now, i);
-    await tx.run(`INSERT INTO salons (id, name, owner, area, description, prefecture, city, street, building, phone, hours, holiday, notes, fee_rate, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [s.id, s.name, s.owner || s.name, s.area || '', s.description || '', s.prefecture || '', s.city || '', s.street || '', s.building || '', s.phone || '', s.hours || '', s.holiday || '', s.notes || '', s.feeRate ?? 5, s.enabled === false ? 0 : 1, created, created]);
+    await tx.run(`INSERT INTO salons (id, name, owner, area, description, prefecture, city, street, building, phone, hours, holiday, notes, fee_rate, supply_fee_rate, supply_biller, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [s.id, s.name, s.owner || s.name, s.area || '', s.description || '', s.prefecture || '', s.city || '', s.street || '', s.building || '', s.phone || '', s.hours || '', s.holiday || '', s.notes || '', s.feeRate ?? 10, s.supplyFeeRate ?? 15, s.supplyBiller || 'fujii', s.enabled === false ? 0 : 1, created, created]);
     for (const [j, st] of (s.staff || []).entries()) { await tx.run('INSERT INTO staff (id, salon_id, name, sort_order, active) VALUES (?, ?, ?, ?, 1)', [st.id, s.id, st.name, j]); staffIds.add(st.id); }
   }
   const salonIds = new Set((state.salons || []).map(s => s.id));
@@ -109,11 +109,11 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   for (const o of [...(state.supplyOrders || [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     if (!salonIds.has(o.salonId)) continue;
     await tx.run(`INSERT INTO supply_orders (id, request_key, salon_id, operator_id, operator_name, source, subscription_id, status, subtotal, shipping, total, tax_total,
-      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, biller, agency_total, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [o.id, o.requestKey || `legacy-${o.id}`, o.salonId, o.operatorId || '', o.operatorName || '', o.source || 'manual', o.subscriptionId || null, o.status, o.subtotal, o.shipping, o.total, o.taxTotal ?? includedTax(o.total),
       o.shipTo?.name || o.salonName, o.shipTo?.address || salonAddress(salonsById.get(o.salonId)), o.note || '', o.carrier || '', o.tracking || '', o.shippedAt || null, o.deliveredAt || null,
-      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.feeRate ?? salonsById.get(o.salonId)?.feeRate ?? 0, o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
+      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.feeRate ?? salonsById.get(o.salonId)?.feeRate ?? 0, o.biller || 'fit', o.agencyTotal || 0, o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
     for (const [i, l] of (o.items || []).entries()) await tx.run('INSERT INTO supply_order_items (supply_order_id, line_no, product_id, sku, name, size, image, unit_price, quantity, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10)', [o.id, i + 1, l.id, l.sku || skuOf(l.id), l.name, l.size || '', l.image || '', l.unitPrice, l.quantity]);
   }
   for (const sub of state.supplySubscriptions || []) {
@@ -123,8 +123,8 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   }
   for (const inv of state.invoices || []) {
     if (!salonIds.has(inv.salonId)) continue;
-    await tx.run(`INSERT INTO invoices (id, salon_id, billing_month, bill_to_name, bill_to_address, salon_name, issued_on, due_on, order_count, subtotal, tax_total, total, status, paid_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [inv.id, inv.salonId, inv.month, inv.billTo?.name || '', inv.billTo?.address || '', inv.salonName, inv.issuedOn, inv.dueOn, inv.orderCount, inv.subtotal, inv.taxTotal, inv.total, inv.status, inv.paidAt || null, inv.createdAt || now, now]);
+    await tx.run(`INSERT INTO invoices (id, salon_id, billing_month, bill_to_name, bill_to_address, salon_name, issued_on, due_on, order_count, subtotal, tax_total, total, status, paid_at, created_at, updated_at, biller)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [inv.id, inv.salonId, inv.month, inv.billTo?.name || '', inv.billTo?.address || '', inv.salonName, inv.issuedOn, inv.dueOn, inv.orderCount, inv.subtotal, inv.taxTotal, inv.total, inv.status, inv.paidAt || null, inv.createdAt || now, now, inv.biller || 'fit']);
   }
   for (const [salonId, ids] of Object.entries(state.supplyFavorites || {})) {
     if (!salonIds.has(salonId)) continue;

@@ -100,3 +100,19 @@ test('older browser data moves the demo purchase cost from 60% to 50% of the pri
   const po = state.purchaseOrders.find(p => p.orderId === sample.id);
   assert.equal(po.total, po.items.reduce((n, i) => n + i.cost * i.quantity, 0) + po.shipping);
 });
+
+test('older browser data gains the billing party per salon, separate EC and purchase rates, and sample purchases billed by 藤井企画', () => {
+  const state = createPlatform(products.slice(0, 6), '2026-10-09T03:00:00.000Z');
+  state.catalogVersion = 5;
+  for (const s of state.salons) { delete s.supplyBiller; delete s.supplyFeeRate; s.feeRate = 5; }
+  state.supplyOrders = state.supplyOrders.filter(o => o.salonId === 'lumiere');
+  for (const o of state.supplyOrders) { delete o.biller; delete o.feeRate; delete o.agencyTotal; }
+  assert.equal(migrate(state, products), true);
+  const atelier = state.salons.find(s => s.id === 'atelier');
+  assert.deepEqual([atelier.supplyBiller, atelier.feeRate, atelier.supplyFeeRate], ['fujii', 10, 15]);
+  assert.ok(state.supplyOrders.filter(o => o.salonId === 'lumiere').every(o => o.biller === 'fit' && o.feeRate === 15 && o.agencyTotal === 0));
+  const samples = state.supplyOrders.filter(o => o.salonId === 'atelier');
+  assert.ok(samples.length > 0 && samples.every(o => o.biller === 'fujii' && o.feeRate === 0 && o.agencyTotal > 0), '藤井企画が請求元の仕入れの例を足す');
+  assert.deepEqual(state.supplyOrders.map(o => o.createdAt), [...state.supplyOrders.map(o => o.createdAt)].sort().reverse(), '新しい順');
+  assert.equal(migrate(state, products), false, '2回目は何もしない');
+});

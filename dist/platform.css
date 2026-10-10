@@ -548,3 +548,5 @@ html{scrollbar-gutter:stable}
 .admin-body .eyebrow,.admin-body .sidebar-label,.admin-body .admin-foot{font-size:11px}
 .admin-body input,.admin-body select,.admin-body textarea,.admin-body .filter-search input,.admin-body .filter-bar select,.admin-body .sales-form input,.admin-body .sales-form select{font-size:14px}
 .admin-body td small{line-height:1.6}
+/* 藤井企画 と F.I.Tソリューション の月次の差し引き */
+.netting-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;padding:0 22px 22px}.netting-grid h3{font-size:13px;font-weight:600;margin-bottom:8px}.netting .grand span:first-child{font-size:13px}.netting .muted-row{color:var(--muted);font-size:12px}@media(max-width:900px){.netting-grid{grid-template-columns:1fr}}

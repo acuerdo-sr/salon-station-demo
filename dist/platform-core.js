@@ -1,5 +1,5 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress, referralSummary, monthBefore } from './supply-core.js';
+import { supplyRequest, supplySnapshot, seedSupply, addFujiiSamples, wholesaleOf, ISSUER, salonAddress, referralSummary, monthBefore, billerInput, agencyPriceOf } from './supply-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js';
 import { validateProfile, profileComplete } from './member-store.js';
 import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js';
@@ -24,6 +24,8 @@ export const int=(value,min,max)=>{if(!Number.isInteger(value)||value<min||value
 export const optional=(value,max)=>{if(value==null)return '';if(typeof value!=='string'||value.trim().length>max)fail(`${max}文字以内で入力してください。`);return value.trim();};
 // 店舗マスタ項目（仕様書 2.6.1）。salon ロールは自店舗の基本情報のみ、admin は全項目を編集できる。
 export const salonBasicFields=['name','prefecture','city','street','building','phone','hours','holiday','notes','description','area'];
+// 管理会社（藤井企画）だけが決める取引の条件：ECの紹介料率（feeRate）・仕入れの紹介料率・仕入れの請求元（加盟店は選ばない）
+export function salonTerms(input,current={}){return {feeRate:int(input?.feeRate??current.feeRate??10,0,30),supplyFeeRate:int(input?.supplyFeeRate??current.supplyFeeRate??15,0,30),supplyBiller:billerInput(input?.supplyBiller??current.supplyBiller??'fujii')};}
 export function salonInput(input){
   const s={name:required(input?.name,80),prefecture:required(input?.prefecture,10),city:required(input?.city,50),street:required(input?.street,100),building:optional(input?.building,100),phone:required(input?.phone,15),hours:optional(input?.hours,50),holiday:optional(input?.holiday,50),notes:optional(input?.notes,500),description:optional(input?.description,120),area:optional(input?.area,60)};
   if(!/^[0-9-]+$/.test(s.phone))fail('電話番号は半角数字・ハイフンで入力してください。');
@@ -81,9 +83,9 @@ function recordViews(state,op,ip,entries,now){for(const entry of entries){const 
 
 // 店舗マスタ（仕様書 2.6.1）：住所・電話番号・営業時間・定休日・備考を保持する。すべて架空。
 export const seedSalons=()=>[
-  {id:'lumiere',name:'LUMIÈRE 表参道',area:'TOKYO / OMOTESANDO',description:'髪と暮らしに、やさしい余白を。',owner:'ルミエール株式会社（架空）',prefecture:'東京都',city:'渋谷区',street:'神宮前0-0-0',building:'デモビル 2F',phone:'03-0000-0000',hours:'10:00〜20:00',holiday:'毎週火曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'haruka',name:'HARUKA'},{id:'yui',name:'YUI'}]},
-  {id:'atelier',name:'atelier 凪',area:'FUKUOKA / YAKUIN',description:'あなたらしい美しさを、毎日のケアから。',owner:'アトリエ凪（架空）',prefecture:'福岡県',city:'福岡市中央区',street:'薬院0-0-0',building:'',phone:'092-000-0000',hours:'9:30〜19:00',holiday:'毎週月曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'mio',name:'MIO'},{id:'ren',name:'REN'}]},
-  {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',prefecture:'山口県',city:'萩市',street:'椿東0-0-0',building:'',phone:'0838-00-0000',hours:'9:00〜18:00',holiday:'毎週月曜日・第3日曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'aoi',name:'AOI'}]},
+  {id:'lumiere',name:'LUMIÈRE 表参道',area:'TOKYO / OMOTESANDO',description:'髪と暮らしに、やさしい余白を。',owner:'ルミエール株式会社（架空）',prefecture:'東京都',city:'渋谷区',street:'神宮前0-0-0',building:'デモビル 2F',phone:'03-0000-0000',hours:'10:00〜20:00',holiday:'毎週火曜日',notes:'',feeRate:10,supplyFeeRate:15,supplyBiller:'fit',enabled:true,staff:[{id:'haruka',name:'HARUKA'},{id:'yui',name:'YUI'}]},
+  {id:'atelier',name:'atelier 凪',area:'FUKUOKA / YAKUIN',description:'あなたらしい美しさを、毎日のケアから。',owner:'アトリエ凪（架空）',prefecture:'福岡県',city:'福岡市中央区',street:'薬院0-0-0',building:'',phone:'092-000-0000',hours:'9:30〜19:00',holiday:'毎週月曜日',notes:'',feeRate:10,supplyFeeRate:15,supplyBiller:'fujii',enabled:true,staff:[{id:'mio',name:'MIO'},{id:'ren',name:'REN'}]},
+  {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',prefecture:'山口県',city:'萩市',street:'椿東0-0-0',building:'',phone:'0838-00-0000',hours:'9:00〜18:00',holiday:'毎週月曜日・第3日曜日',notes:'',feeRate:10,supplyFeeRate:15,supplyBiller:'fujii',enabled:true,staff:[{id:'aoi',name:'AOI'}]},
 ];
 // 保存済みの状態（SQLite / ブラウザ）に、後から追加した項目（お悩みカテゴリ・店舗住所・会員任意項目）を補う。
 // 初期の商品：仕入原価（F.I.Tソリューション の仕入れ値）は売価の5割、卸価格は6.5割、仕入先（出荷元）はディーラーの BICMA。
@@ -119,6 +121,14 @@ export function migrate(state,catalog){
   // 版4：初期商品の短い説明を書き直した。版3は公開から間もなく書き直したため、版3のデータは初期商品の説明を新しいものに替える
   if((state.catalogVersion||1)<CATALOG_VERSION&&Array.isArray(state.products)&&Array.isArray(state.categories)){
     const from=state.catalogVersion||1;
+    // 版6：紹介料率を EC と仕入れで分け、仕入れの請求元を加盟店ごとに。以前の既定（5%）のままなら EC 10%・仕入れ 15%。以前の仕入れ・請求書は、いまの請求元で補う
+    if(from<6){
+      const seeds=seedSalons();
+      for(const s of state.salons||[]){if(s.supplyBiller===undefined){s.supplyBiller=seeds.find(x=>x.id===s.id)?.supplyBiller||'fujii';s.supplyFeeRate=15;if(s.feeRate===5)s.feeRate=10;}}
+      for(const o of state.supplyOrders||[])if(o.biller===undefined){const s=(state.salons||[]).find(x=>x.id===o.salonId);o.biller=s?.supplyBiller||'fit';o.feeRate=o.biller==='fit'?(s?.supplyFeeRate??15):0;o.agencyTotal=o.biller==='fujii'?o.items.reduce((n,l)=>n+agencyPriceOf((state.products||[]).find(p=>p.id===l.id)?.price??Math.round(l.unitPrice/.65))*l.quantity,0):0;}
+      for(const i of state.invoices||[])if(i.biller===undefined)i.biller=(state.supplyOrders||[]).find(o=>o.invoiceId===i.id)?.biller||'fit';
+      addFujiiSamples(state,new Date().toISOString());
+    }
     // 版5：デモの仕入原価を売価の6割から5割に（F.I.Tソリューション に利益が残るように）。以前の既定のままの商品と、初期サンプルの注文・出荷指示だけ直す
     if(from<5){
       const oldCost=price=>Math.round(price*OLD_DEMO_COST_RATE),newCost=price=>Math.round(price*DEMO_COST_RATE);
@@ -252,7 +262,7 @@ export function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.c
 // effects には、実際に状態が変わったときだけ通知などの副作用の種類を積む（再送・同一状態への更新では積まない）。
 export function platformRequest(state,route,method='GET',input,actor={},now=new Date().toISOString(),effects=[]){
   // クローズドサイト（仕様書 2.2.6）：未ログインには商品・価格を返さない。サロン一覧は会員登録時の選択用に返す。
-  if(route==='/bootstrap'&&method==='GET'){const products=actor.member||actor.operator?safeProducts(state):[];return {closed:true,products,categories:[...state.categories].sort((a,b)=>a.sortOrder-b.sortOrder).filter(c=>products.some(p=>p.category===c.name)).map(({id,name})=>({id,name})),salons:clone(state.salons.filter(s=>s.enabled)).map(({feeRate,notes,...s})=>s),dealers:clone(state.dealers),revision:state.revision};}
+  if(route==='/bootstrap'&&method==='GET'){const products=actor.member||actor.operator?safeProducts(state):[];return {closed:true,products,categories:[...state.categories].sort((a,b)=>a.sortOrder-b.sortOrder).filter(c=>products.some(p=>p.category===c.name)).map(({id,name})=>({id,name})),salons:clone(state.salons.filter(s=>s.enabled)).map(({feeRate,supplyFeeRate,supplyBiller,notes,...s})=>s),dealers:clone(state.dealers),revision:state.revision};}
   if(route==='/profile'&&method==='GET'){const p=currentProfile(state,actor.member);if(!p)return null;const s=state.salons.find(x=>x.id===p.salonId);const address=sortAddresses(addressBook(state,p.id)).find(a=>a.isDefault);return {...clone(p),salonName:s?.name||'',salonEnabled:Boolean(s?.enabled),address:address?addressView(address):null};}
   // 住所管理（仕様書 2.1.3）：お届け先を10件まで登録・編集・削除し、いつものお届け先を選ぶ
   if(route==='/addresses'||route.startsWith('/addresses/')){
@@ -408,7 +418,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   if(route==='/admin/salons'&&method==='POST'){
     const op=requireOperator(actor,['admin']);
     // 入力をすべて検証してから店舗IDを採番する（検証エラーで番号を消費しない）
-    const fields={...salonInput(input),owner:required(input?.owner,100),feeRate:int(input?.feeRate??5,0,30),enabled:input?.enabled!==false,staff:staffList(input?.staff)};
+    const fields={...salonInput(input),owner:required(input?.owner,100),...salonTerms(input),enabled:input?.enabled!==false,staff:staffList(input?.staff)};
     const salon={id:nextSalonId(state),...fields};
     state.salons.push(salon);log(state,op,'店舗を登録',salon.id,now);return clone(salon);
   }
@@ -436,8 +446,8 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const op=requireOperator(actor,['admin','salon']),salon=salonFor(state,salonAction[1]);
     if(op.role==='salon'&&op.salonId!==salon.id)fail('他店舗の情報は編集できません。',403);
     const update=salonInput({...salon,...input});
-    if(op.role==='admin'){update.owner=required(input?.owner??salon.owner,100);update.feeRate=int(input?.feeRate??salon.feeRate,0,30);if(input?.enabled!==undefined&&typeof input.enabled!=='boolean')fail('受付設定を確認してください。');update.enabled=input?.enabled??salon.enabled;if(input?.staff!==undefined)update.staff=staffList(input.staff,salon.staff);}
-    else if(['owner','feeRate','enabled','staff'].some(k=>input?.[k]!==undefined))fail('サロン担当者は紹介料率・受付設定・販売事業者名を変更できません。',403);
+    if(op.role==='admin'){update.owner=required(input?.owner??salon.owner,100);Object.assign(update,salonTerms(input,salon));if(input?.enabled!==undefined&&typeof input.enabled!=='boolean')fail('受付設定を確認してください。');update.enabled=input?.enabled??salon.enabled;if(input?.staff!==undefined)update.staff=staffList(input.staff,salon.staff);}
+    else if(['owner','feeRate','supplyFeeRate','supplyBiller','enabled','staff'].some(k=>input?.[k]!==undefined))fail('サロン担当者は紹介料率・仕入れの請求元・受付設定・販売事業者名を変更できません。',403);
     Object.assign(salon,update);log(state,op,op.role==='admin'?'店舗設定を更新':'サロン情報を編集',salon.id,now);return clone(salon);
   }
   if(salonAction&&method==='DELETE'){

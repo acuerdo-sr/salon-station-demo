@@ -72,7 +72,7 @@ test('salon master: admin registers, salon edits own basic info only, delete is 
   assert.throws(()=>platformRequest(s,'/admin/salons','POST',{...input,prefecture:''},admin),/入力内容/);
   assert.ok(platformRequest(s,'/bootstrap','GET',undefined,{member}).salons.some(x=>x.id==='S004'));
   const edited=platformRequest(s,'/admin/salons/lumiere','PATCH',{name:'LUMIÈRE 表参道 本店',phone:'03-1111-1111',hours:'11:00〜21:00'},salon,now);
-  assert.equal(edited.name,'LUMIÈRE 表参道 本店');assert.equal(edited.phone,'03-1111-1111');assert.equal(edited.feeRate,5);assert.equal(edited.owner,'ルミエール株式会社（架空）');
+  assert.equal(edited.name,'LUMIÈRE 表参道 本店');assert.equal(edited.phone,'03-1111-1111');assert.equal(edited.feeRate,10);assert.equal(edited.owner,'ルミエール株式会社（架空）');
   assert.throws(()=>platformRequest(s,'/admin/salons/lumiere','PATCH',{feeRate:0},salon),/変更できません/);
   assert.throws(()=>platformRequest(s,'/admin/salons/atelier','PATCH',{name:'x'},salon),/他店舗/);
   const staffKept=platformRequest(s,'/admin/salons/lumiere','PATCH',{staff:'HARUKA, NEW',feeRate:8,enabled:true},admin,now);

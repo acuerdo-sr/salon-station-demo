@@ -8,8 +8,29 @@ export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', sh
 export const supplySources = { manual: '通常', reorder: '再注文', suggestion: '発注提案', subscription: '定期発注' };
 export const supplyIntervals = { weekly: '毎週', biweekly: '2週間ごと', monthly: '毎月' };
 // 請求書の発行者（架空）。本番ではフランチャイザーの名称・適格請求書発行事業者の登録番号・振込先に置き換える。
-// 加盟店（美容室）の仕入れの取引先・請求書の発行元：ディーラーの F.I.Tソリューション（BICMA）。登録番号・住所・口座は架空
+// 加盟店（美容室）の仕入れの請求元は、加盟店ごとに管理会社（藤井企画）が決める（加盟店は選ばない）。
+// - fit：ディーラーの F.I.Tソリューション（BICMA）が直接取引し、仕入れの紹介料を藤井企画へ支払う
+// - fujii：藤井企画が卸す（いまの LINE・メールの注文と同じ取引）。出荷は F.I.T、F.I.T は藤井企画へ卸代金を請求。仕入れの紹介料はかからない
+// 登録番号・住所・口座は架空
 export const ISSUER = { name: 'F.I.Tソリューション（BICMA）', registrationNumber: 'T0000000000000', address: '山口県萩市椿東0-0-0（架空）', phone: '0838-00-0000', bank: 'デモ銀行 本店 普通 0000000（架空）' };
+export const ISSUER_FUJII = { name: '藤井企画', registrationNumber: 'T0000000000001', address: '山口県萩市椿東0-0-1（架空）', phone: '0838-00-0001', bank: 'デモ銀行 本店 普通 0000001（架空）' };
+export const BILLERS = { fujii: '藤井企画', fit: 'F.I.Tソリューション' };
+export const issuerFor = biller => ({ ...(biller === 'fujii' ? ISSUER_FUJII : ISSUER) });
+// 藤井企画が F.I.T から仕入れる値段（推定：売価の55%）。請求元が藤井企画の仕入れで、F.I.T が藤井企画へ請求する卸代金に使う
+export const AGENCY_RATE = 0.55;
+export const agencyPriceOf = price => Math.round(price * AGENCY_RATE);
+export const billerInput = value => { const v = String(value ?? 'fujii'); if (!BILLERS[v]) fail('仕入れの請求元を選んでください。'); return v; };
+// 1か月の請求書は1社から：その月にすでに仕入れがあれば、その請求元のまま（請求元の変更は次の月の仕入れから）
+export const supplyBillerFor = (salon, monthOrders) => monthOrders.find(o => o.status !== 'cancelled' && o.biller)?.biller || salon.supplyBiller || 'fit';
+// 請求書を締める・入金を記録するのは請求元：F.I.Tソリューション はディーラー、藤井企画は管理会社のアカウント
+export const billerOfRole = role => role === 'admin' ? 'fujii' : 'fit';
+// 請求書を見られるのは：加盟店は自店の分、藤井企画はすべて、F.I.Tソリューション は自分が請求元の分（藤井企画が加盟店へ出す請求書は見せない）
+export const invoiceVisible = (op, inv) => op.role === 'admin' || (op.role === 'dealer' ? (inv.biller || 'fit') === 'fit' : inv.salonId === op.salonId);
+export function invoiceReader(actor, inv) {
+  const op = requireOperator(actor, ['admin', 'salon', 'dealer']);
+  if (!invoiceVisible(op, inv)) fail(op.role === 'salon' ? '他店舗の請求書は見られません。' : 'この請求書は藤井企画が加盟店へ発行したものです。', 403);
+  return op;
+}
 export const wholesaleOf = price => Math.round(price * 0.65);
 export const supplyOrderId = now => 'WO-' + now.slice(2, 10).replaceAll('-', '') + '-' + crypto.randomUUID().slice(0, 5).toUpperCase();
 export const subscriptionId = () => 'SUB-' + crypto.randomUUID().slice(0, 8).toUpperCase();
@@ -100,18 +121,23 @@ export function supplySuggestions(history, products, today) {
   }
   return out.sort((a, b) => b.daysSince / b.averageDays - a.daysSince / a.averageDays);
 }
-// 紹介料：F.I.Tソリューション が藤井企画へ支払う。加盟店ごとに（お客様のEC売上＋加盟店の仕入れ）× 紹介料率（注文時の率）。
+// 紹介料：F.I.Tソリューション が藤井企画へ支払う。加盟店ごとに「お客様のEC売上 × ECの紹介料率」＋「F.I.T が請求元の仕入れ × 仕入れの紹介料率」（注文時の率）。
+// 請求元が藤井企画の仕入れには紹介料はかからず、藤井企画の粗利（卸価格 − 藤井企画の仕入値）になる。F.I.T は藤井企画へ卸代金（agencyTotal）を請求する。
 // EC は注文日（日本時間）の月、仕入れは請求の月で数える。キャンセル・返品済みは除く。share は同じ月の美容室の取り分（F.I.Tソリューション → 美容室）
 export function referralSummary({ month, salons, orders, supplyOrders }) {
   const rows = salons.map(s => {
     const ec = orders.filter(o => o.salonId === s.id && jst(o.createdAt).slice(0, 7) === month && !['cancelled', 'returned'].includes(o.status));
     const sup = supplyOrders.filter(o => o.salonId === s.id && o.billingMonth === month && o.status !== 'cancelled');
-    const ecSales = ec.reduce((n, o) => n + o.subtotal, 0), ecFee = ec.reduce((n, o) => n + o.fee, 0), share = ec.reduce((n, o) => n + (o.share ?? shareOf(o.items)), 0);
-    const supplySales = sup.reduce((n, o) => n + o.subtotal, 0), supplyFee = sup.reduce((n, o) => n + feeOf(o.subtotal, o.feeRate ?? s.feeRate), 0);
-    return { salonId: s.id, salonName: s.name, rate: s.feeRate, ecSales, ecOrders: ec.length, share, supplySales, supplyOrders: sup.length, ecFee, supplyFee, fee: ecFee + supplyFee };
+    const viaFit = sup.filter(o => (o.biller || 'fit') === 'fit'), viaFujii = sup.filter(o => o.biller === 'fujii');
+    const sum = (list, f) => list.reduce((n, o) => n + f(o), 0);
+    const ecSales = sum(ec, o => o.subtotal), ecFee = sum(ec, o => o.fee), share = sum(ec, o => o.share ?? shareOf(o.items));
+    const fitSales = sum(viaFit, o => o.subtotal), supplyFee = sum(viaFit, o => feeOf(o.subtotal, o.feeRate ?? s.supplyFeeRate ?? s.feeRate));
+    const fujiiSales = sum(viaFujii, o => o.subtotal), agencyTotal = sum(viaFujii, o => o.agencyTotal || 0), fujiiMargin = fujiiSales - agencyTotal;
+    return { salonId: s.id, salonName: s.name, biller: s.supplyBiller || 'fit', rate: s.feeRate, supplyRate: s.supplyFeeRate ?? s.feeRate, ecSales, ecOrders: ec.length, share,
+      supplySales: fitSales + fujiiSales, supplyOrders: sup.length, fitSales, fujiiSales, ecFee, supplyFee, fee: ecFee + supplyFee, agencyTotal, fujiiMargin, fujiiIncome: ecFee + supplyFee + fujiiMargin };
   }).filter(r => r.ecOrders || r.supplyOrders);
   const total = k => rows.reduce((n, r) => n + r[k], 0);
-  return { month, rows, total: { ecSales: total('ecSales'), share: total('share'), supplySales: total('supplySales'), ecFee: total('ecFee'), supplyFee: total('supplyFee'), fee: total('fee') } };
+  return { month, rows, total: Object.fromEntries(['ecSales', 'share', 'supplySales', 'fitSales', 'fujiiSales', 'ecFee', 'supplyFee', 'fee', 'agencyTotal', 'fujiiMargin', 'fujiiIncome'].map(k => [k, total(k)])) };
 }
 // 請求書の参考情報：同じ月の店販ECでサロンが受け取る見込み額
 export const monthBefore = month => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; };
@@ -142,8 +168,10 @@ function placeSupply(state, { key, lines, note = '', source = 'manual', subscrip
   const old = state.supplyOrders.find(o => o.requestKey === key);
   if (old) { if (old.salonId !== salonId) fail('この発注は取得できません。', 403); return old; }
   const salon = state.salons.find(s => s.id === salonId) || fail('サロンが見つかりません。', 404);
-  const items = lines(), id = supplyOrderId(now);
-  const order = { id, requestKey: key, salonId, salonName: salon.name, operatorId: op.id, operatorName: op.name, source, subscriptionId, status: 'ordered', items: items.map(l => ({ ...l, amount: l.unitPrice * l.quantity })), ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note, carrier: '', tracking: '', shippedAt: '', deliveredAt: '', billingMonth: jst(now).slice(0, 7), invoiceId: '', orderedOn: jst(now).slice(0, 10), createdAt: now, stockRestored: false, feeRate: salon.feeRate };
+  const items = lines(), id = supplyOrderId(now), month = jst(now).slice(0, 7);
+  const biller = supplyBillerFor(salon, state.supplyOrders.filter(o => o.salonId === salonId && o.billingMonth === month));
+  const agencyTotal = biller === 'fujii' ? items.reduce((s, l) => s + agencyPriceOf(state.products.find(p => p.id === l.id).price) * l.quantity, 0) : 0;
+  const order = { id, requestKey: key, salonId, salonName: salon.name, operatorId: op.id, operatorName: op.name, source, subscriptionId, status: 'ordered', items: items.map(l => ({ ...l, amount: l.unitPrice * l.quantity })), ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note, carrier: '', tracking: '', shippedAt: '', deliveredAt: '', billingMonth: month, invoiceId: '', orderedOn: jst(now).slice(0, 10), createdAt: now, stockRestored: false, biller, feeRate: biller === 'fit' ? (salon.supplyFeeRate ?? salon.feeRate) : 0, agencyTotal };
   for (const l of items) state.products.find(p => p.id === l.id).stock -= l.quantity;
   state.supplyOrders.unshift(order);
   log(state, op, source === 'subscription' ? '定期発注を作成' : '加盟店発注を受付', id, now);
@@ -165,12 +193,12 @@ export function runSubscriptions(state, now, effects = []) {
 }
 function invoiceDetail(state, inv) {
   const orders = state.supplyOrders.filter(o => inv.orderIds.includes(o.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return { ...invoiceSummary(inv), issuer: { ...ISSUER }, orders: orders.map(o => ({ id: o.id, orderedOn: o.orderedOn, items: clone(o.items), subtotal: o.subtotal, shipping: o.shipping, total: o.total })), ecProceeds: ecProceedsFor(state.orders, inv.salonId, inv.month) };
+  return { ...invoiceSummary(inv), issuer: issuerFor(inv.biller), orders: orders.map(o => ({ id: o.id, orderedOn: o.orderedOn, items: clone(o.items), subtotal: o.subtotal, shipping: o.shipping, total: o.total })), ecProceeds: ecProceedsFor(state.orders, inv.salonId, inv.month) };
 }
 export function supplySnapshot(state, op) {
   // 管理会社（藤井企画）は状況の確認、ディーラー（F.I.Tソリューション）は受付・出荷・請求、加盟店は自店の分
   const mine = x => op.role === 'admin' || op.role === 'dealer' || x.salonId === op.salonId;
-  return { supplyOrders: (state.supplyOrders || []).filter(mine).slice(0, 1000).map(supplyView), subscriptions: clone((state.supplySubscriptions || []).filter(mine)), invoices: (state.invoices || []).filter(mine).map(invoiceSummary) };
+  return { supplyOrders: (state.supplyOrders || []).filter(mine).slice(0, 1000).map(supplyView), subscriptions: clone((state.supplySubscriptions || []).filter(mine)), invoices: (state.invoices || []).filter(i => invoiceVisible(op, i)).map(invoiceSummary) };
 }
 export function supplyRequest(state, route, method, input, actor, now, effects) {
   state.supplyOrders ??= []; state.supplySubscriptions ??= []; state.invoices ??= [];
@@ -188,10 +216,10 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
       orders: sold.map(o => ({ month: monthOf(o), memberId: o.memberId, subtotal: o.subtotal, share: shareOf(o.items) })),
       items: sold.filter(o => monthOf(o) === month).flatMap(o => o.items.map(i => ({ productId: i.id, name: i.name, quantity: i.quantity, sales: i.price * i.quantity }))) });
     return {
-      salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: salon.feeRate },
+      salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: salon.feeRate, biller: salon.supplyBiller || 'fit', billerName: BILLERS[salon.supplyBiller || 'fit'] },
       products, ec, favorites: (state.supplyFavorites?.[salon.id] || []).filter(id => products.some(p => p.id === id)),
       orders: own.slice(0, 50).map(supplyView), subscriptions: clone(state.supplySubscriptions.filter(s => s.salonId === op.salonId)),
-      suggestions: supplySuggestions(history, state.products, today), invoices: state.invoices.filter(i => i.salonId === op.salonId).map(invoiceSummary), issuer: { ...ISSUER },
+      suggestions: supplySuggestions(history, state.products, today), invoices: state.invoices.filter(i => i.salonId === op.salonId).map(invoiceSummary), issuer: issuerFor(salon.supplyBiller),
     };
   }
   if (route === '/supply/favorites' && method === 'PUT') {
@@ -229,7 +257,7 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
     return clone(sub);
   }
   const invoice = route.match(/^\/supply\/invoices\/([^/]+)$/);
-  if (invoice && method === 'GET') { const inv = state.invoices.find(i => i.id === invoice[1]) || fail('請求書が見つかりません。', 404); ownSupply(actor, inv.salonId); return invoiceDetail(state, inv); }
+  if (invoice && method === 'GET') { const inv = state.invoices.find(i => i.id === invoice[1]) || fail('請求書が見つかりません。', 404); invoiceReader(actor, inv); return invoiceDetail(state, inv); }
   const ship = route.match(/^\/admin\/supply-orders\/([^/]+)$/);
   if (ship && method === 'PATCH') {
     const op = requireOperator(actor, ['dealer']), order = state.supplyOrders.find(o => o.id === ship[1]) || fail('発注が見つかりません。', 404);
@@ -243,21 +271,22 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
   }
   if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin', 'dealer']); return runSubscriptions(state, now, effects); }
   if (route === '/admin/invoices/close' && method === 'POST') {
-    const op = requireOperator(actor, ['dealer']), month = closableMonth(input, now), created = [];
+    const op = requireOperator(actor, ['dealer', 'admin']), biller = billerOfRole(op.role), month = closableMonth(input, now), created = [];
     for (const salon of state.salons) {
       if (state.invoices.some(i => i.salonId === salon.id && i.month === month)) continue;
-      const orders = state.supplyOrders.filter(o => o.salonId === salon.id && o.billingMonth === month && o.status !== 'cancelled' && !o.invoiceId);
+      const orders = state.supplyOrders.filter(o => o.salonId === salon.id && o.billingMonth === month && o.status !== 'cancelled' && !o.invoiceId && (o.biller || 'fit') === biller);
       if (!orders.length) continue;
       const total = orders.reduce((s, o) => s + o.total, 0);
-      const inv = { id: invoiceId(month, salon.id), salonId: salon.id, salonName: salon.name, billTo: { name: salon.owner, address: salonAddress(salon) }, month, issuedOn: today, dueOn: invoiceDueOn(month), orderIds: orders.map(o => o.id), orderCount: orders.length, subtotal: total, taxTotal: includedTax(total), total, status: 'issued', paidAt: '', createdAt: now };
+      const inv = { id: invoiceId(month, salon.id), salonId: salon.id, salonName: salon.name, billTo: { name: salon.owner, address: salonAddress(salon) }, month, issuedOn: today, dueOn: invoiceDueOn(month), orderIds: orders.map(o => o.id), orderCount: orders.length, subtotal: total, taxTotal: includedTax(total), total, status: 'issued', paidAt: '', createdAt: now, biller };
       orders.forEach(o => { o.invoiceId = inv.id; }); state.invoices.unshift(inv); created.push(invoiceSummary(inv));
     }
-    log(state, op, `${month} 分を締めて請求書を発行（${created.length}件）`, month, now);
+    log(state, op, `${month} 分を締めて請求書を発行（${BILLERS[biller]}・${created.length}件）`, month, now);
     return { month, created };
   }
   const paid = route.match(/^\/admin\/invoices\/([^/]+)$/);
   if (paid && method === 'PATCH') {
-    const op = requireOperator(actor, ['dealer']), inv = state.invoices.find(i => i.id === paid[1]) || fail('請求書が見つかりません。', 404);
+    const op = requireOperator(actor, ['dealer', 'admin']), inv = state.invoices.find(i => i.id === paid[1]) || fail('請求書が見つかりません。', 404);
+    if ((inv.biller || 'fit') !== billerOfRole(op.role)) fail(`この請求書の入金は、請求元の${BILLERS[inv.biller || 'fit']}が記録します。`, 403);
     if (input?.status !== 'paid') fail('入金済みにする操作だけができます。');
     if (inv.status !== 'paid') { inv.status = 'paid'; inv.paidAt = now; log(state, op, '請求書を入金済みに更新', inv.id, now); }
     return invoiceSummary(inv);
@@ -265,13 +294,24 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
   return undefined;
 }
 // ブラウザ版の初期データ：LUMIÈRE の過去の仕入発注（発注提案が出るように2週間ごと）と定期発注1件
+// デモの仕入れ：LUMIÈRE は請求元 F.I.Tソリューション、atelier 凪 は請求元 藤井企画（これまでのお取引）の例。[何日前, 加盟店, 明細, 状態]
+const LUMIERE_SAMPLES = [[42, 'lumiere', [['shampoo-moist', 6], ['treatment-repair', 3]], 'delivered'], [35, 'lumiere', [['oil-smooth', 4]], 'delivered'], [28, 'lumiere', [['shampoo-moist', 6]], 'delivered'], [14, 'lumiere', [['shampoo-moist', 6], ['treatment-repair', 3]], 'shipped']];
+const FUJII_SAMPLES = [[38, 'atelier', [['treatment-repair', 4], ['oil-smooth', 2]], 'delivered'], [21, 'atelier', [['shampoo-moist', 6]], 'delivered'], [2, 'atelier', [['shampoo-moist', 3], ['oil-smooth', 2]], 'accepted']];
+function sampleSupply(state, now, [ago, salonId, lines, status]) {
+  const salon = state.salons.find(s => s.id === salonId), op = salonId === 'lumiere' ? { id: 'salon-a', name: 'LUMIÈRE 店舗担当' } : { id: 'salon-' + salonId, name: salon.name + ' 店舗担当' };
+  const at = new Date(Date.parse(now) - ago * DAY).toISOString(), items = lines.map(([id, quantity]) => { const p = state.products.find(p => p.id === id); return { id, sku: p.sku, name: p.name, size: p.size, image: p.image, unitPrice: p.wholesalePrice, quantity, amount: p.wholesalePrice * quantity }; });
+  return { id: 'WO-' + at.slice(2, 10).replaceAll('-', '') + '-S' + String(ago).padStart(4, '0'), requestKey: `sample-${salonId}-${ago}`, salonId: salon.id, salonName: salon.name, operatorId: op.id, operatorName: op.name, source: 'manual', subscriptionId: null, status, items, ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note: '', tracking: status === 'accepted' ? '' : 'DEMO-W' + ago, carrier: status === 'accepted' ? '' : 'デモ配送', shippedAt: status === 'accepted' ? '' : at, deliveredAt: status === 'delivered' ? at : '', billingMonth: jst(at).slice(0, 7), invoiceId: '', orderedOn: jst(at).slice(0, 10), createdAt: at, stockRestored: false,
+      biller: salon.supplyBiller || 'fit', feeRate: (salon.supplyBiller || 'fit') === 'fit' ? salon.supplyFeeRate ?? 15 : 0, agencyTotal: salon.supplyBiller === 'fujii' ? lines.reduce((n, [id, quantity]) => n + agencyPriceOf(state.products.find(p => p.id === id).price) * quantity, 0) : 0 };
+}
+// 以前のデモデータ（LUMIÈRE の仕入れだけ）にも、藤井企画が請求元の仕入れの例を足す（atelier 凪 の仕入れがまだないときだけ）
+export function addFujiiSamples(state, now) {
+  const salon = (state.salons || []).find(s => s.id === 'atelier'), names = FUJII_SAMPLES.flatMap(r => r[2].map(l => l[0]));
+  if (!salon || salon.supplyBiller !== 'fujii' || (state.supplyOrders || []).some(o => o.salonId === 'atelier') || !names.every(id => (state.products || []).some(p => p.id === id))) return false;
+  state.supplyOrders = [...FUJII_SAMPLES.map(r => sampleSupply(state, now, r)), ...(state.supplyOrders || [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return true;
+}
 export function seedSupply(state, now) {
-  const today = jst(now).slice(0, 10), op = { id: 'salon-a', name: 'LUMIÈRE 店舗担当' }, salon = state.salons.find(s => s.id === 'lumiere');
-  const plan = [[42, [['shampoo-moist', 6], ['treatment-repair', 3]], 'delivered'], [35, [['oil-smooth', 4]], 'delivered'], [28, [['shampoo-moist', 6]], 'delivered'], [14, [['shampoo-moist', 6], ['treatment-repair', 3]], 'shipped']];
-  state.supplyOrders = []; state.supplySubscriptions = []; state.invoices = [];
-  for (const [ago, lines, status] of plan) {
-    const at = new Date(Date.parse(now) - ago * DAY).toISOString(), items = lines.map(([id, quantity]) => { const p = state.products.find(p => p.id === id); return { id, sku: p.sku, name: p.name, size: p.size, image: p.image, unitPrice: p.wholesalePrice, quantity, amount: p.wholesalePrice * quantity }; });
-    state.supplyOrders.unshift({ id: 'WO-' + at.slice(2, 10).replaceAll('-', '') + '-S' + String(ago).padStart(4, '0'), requestKey: `sample-${ago}`, salonId: salon.id, salonName: salon.name, operatorId: op.id, operatorName: op.name, source: 'manual', subscriptionId: null, status, items, ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note: '', carrier: 'デモ配送', tracking: 'DEMO-W' + ago, shippedAt: at, deliveredAt: status === 'delivered' ? at : '', billingMonth: jst(at).slice(0, 7), invoiceId: '', orderedOn: jst(at).slice(0, 10), createdAt: at, stockRestored: false });
-  }
-  state.supplySubscriptions.push({ id: 'SUB-SAMPLE1', salonId: salon.id, operatorId: op.id, interval: 'weekly', items: [{ id: 'oil-smooth', quantity: 2 }], nextRunOn: addDays(today, 3), active: true, lastRunOn: '', lastResult: '', createdAt: now });
+  const today = jst(now).slice(0, 10);
+  state.supplyOrders = [...LUMIERE_SAMPLES, ...FUJII_SAMPLES].map(r => sampleSupply(state, now, r)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); state.supplySubscriptions = []; state.invoices = [];
+  state.supplySubscriptions.push({ id: 'SUB-SAMPLE1', salonId: 'lumiere', operatorId: 'salon-a', interval: 'weekly', items: [{ id: 'oil-smooth', quantity: 2 }], nextRunOn: addDays(today, 3), active: true, lastRunOn: '', lastResult: '', createdAt: now });
 }

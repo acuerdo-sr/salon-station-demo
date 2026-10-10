@@ -65,7 +65,7 @@ for (const [name, create] of engines) {
     assert.equal(await stockOf(e, 'shampoo-moist'), before - 2);
     const snap = await e.call('/admin/snapshot', 'GET', undefined, admin), pos = snap.purchaseOrders.filter(p => p.orderId === o.id);
     // ディーラーは BICMA だけなので、1つの注文の出荷指示は1件（仕入値の合計＋送料）
-    assert.equal(pos.length, 1); assert.equal(snap.orders.find(x => x.id === o.id).fee, 418);
+    assert.equal(pos.length, 1); assert.equal(snap.orders.find(x => x.id === o.id).fee, 836, 'ECの紹介料率（デモ10%）');
     const [po] = pos;
     assert.equal(po.dealerId, 'bicma'); assert.equal(po.total, 1430 * 2 + 1320 + 660);
     const move = async (actor, status, effects = []) => { await e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'DEMO-1' }, actor, now, effects); return effects; };
@@ -166,7 +166,7 @@ for (const [name, create] of engines) {
     assert.equal(created.id, 'S004'); assert.deepEqual(created.staff.map(s => s.name), ['AKI', 'RIN']); assert.equal(created.feeRate, 6);
     assert.ok((await e.call('/bootstrap', 'GET', undefined, {})).salons.some(s => s.id === 'S004'));
     const edited = await e.call('/admin/salons/lumiere', 'PATCH', { name: 'LUMIÈRE 本店', hours: '11:00〜21:00' }, salonOp);
-    assert.equal(edited.name, 'LUMIÈRE 本店'); assert.equal(edited.feeRate, 5);
+    assert.equal(edited.name, 'LUMIÈRE 本店'); assert.equal(edited.feeRate, 10);
     await assert.rejects(e.call('/admin/salons/lumiere', 'PATCH', { feeRate: 0 }, salonOp), /変更できません/);
     await assert.rejects(e.call('/admin/salons/atelier', 'PATCH', { name: 'x' }, salonOp), /他店舗/);
     const staffed = await e.call('/admin/salons/lumiere', 'PATCH', { staff: 'HARUKA, NEW' }, admin);

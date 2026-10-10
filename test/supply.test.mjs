@@ -118,7 +118,7 @@ for (const [name, create] of engines(now)) {
   });
 
   run('monthly invoices: only finished months, one per salon, qualified-invoice totals, paid status, invoiced orders locked', async e => {
-    await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, admin), /権限/, '請求書は F.I.Tソリューション が発行する');
+    assert.deepEqual((await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, admin)).created.map(i => i.salonId), ['atelier'], 'LUMIÈRE は請求元が F.I.T なので、藤井企画の締めでは atelier 凪（請求元 藤井企画）だけ'); 
     await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-10' }, dealer), /月が終わってから/);
     await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-13' }, dealer), /YYYY-MM/);
     await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, salonOp), /権限/);
@@ -133,7 +133,7 @@ for (const [name, create] of engines(now)) {
     assert.equal(detail.orders.length, 3); assert.equal(detail.billTo.name, 'ルミエール株式会社（架空）'); assert.ok(detail.issuer.registrationNumber); assert.equal(typeof detail.ecProceeds, 'number');
     assert.equal(detail.orders.reduce((s, o) => s + o.total, 0), total);
     await assert.rejects(e.call('/supply/invoices/' + inv.id, 'GET', undefined, otherSalon), /他店舗/);
-    await assert.rejects(e.call('/supply/invoices/' + inv.id, 'GET', undefined, dealer), /権限/);
+    assert.equal((await e.call('/supply/invoices/' + inv.id, 'GET', undefined, dealer)).id, inv.id, 'F.I.T は自分が請求元の請求書を見られる');
     assert.ok((await e.call('/supply', 'GET', undefined, salonOp)).orders.filter(o => o.billingMonth === '2026-09').every(o => o.invoiceId === inv.id));
     await assert.rejects(e.call('/admin/invoices/' + inv.id, 'PATCH', { status: 'paid' }, salonOp), /権限/);
     const paid = await e.call('/admin/invoices/' + inv.id, 'PATCH', { status: 'paid' }, dealer, later(3));
@@ -144,7 +144,52 @@ for (const [name, create] of engines(now)) {
     assert.equal(nov.created[0].orderCount, 1); assert.equal(nov.created[0].total, october.total);
     await assert.rejects(e.call('/supply/orders/' + october.id + '/cancel', 'POST', {}, salonOp), /請求書を発行済み/);
     const listed = (await e.call('/admin/snapshot', 'GET', undefined, admin)).invoices.map(i => i.id).sort();
-    assert.deepEqual(listed, ['INV-202609-lumiere', 'INV-202610-lumiere']);
+    assert.deepEqual(listed, ['INV-202609-atelier', 'INV-202609-lumiere', 'INV-202610-lumiere']);
+  });
+
+  run('billing party per salon is set by the management company: Fujii-billed purchases carry no purchase referral fee, and each party closes and collects its own invoices', async e => {
+    // 加盟店・ディーラーは請求元と紹介料率を変えられない。値は確かめる
+    await assert.rejects(e.call('/admin/salons/lumiere', 'PATCH', { supplyBiller: 'fujii' }, salonOp), /請求元/);
+    await assert.rejects(e.call('/admin/salons/lumiere', 'PATCH', { supplyBiller: 'x' }, admin), /請求元/);
+    await assert.rejects(e.call('/admin/salons/atelier', 'PATCH', { supplyBiller: 'fit' }, dealer), /権限/);
+    const atelier = (await e.call('/admin/snapshot', 'GET', undefined, admin)).salons.find(x => x.id === 'atelier');
+    assert.deepEqual([atelier.supplyBiller, atelier.feeRate, atelier.supplyFeeRate], ['fujii', 10, 15], 'デモの atelier 凪 は藤井企画から仕入れる');
+    const order = (actor, at, quantity = 2) => e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity, price: 1859 }] }, actor, at);
+    const sep = '2026-09-10T03:00:00.000Z', refAt = '2026-09-25T03:00:00.000Z';
+    // サンプルにも atelier 凪 の9月の仕入れ（請求元 藤井企画）がある。ここで足す分との差で確かめる
+    const base = (await e.call('/admin/snapshot', 'GET', undefined, admin, refAt)).referrals.current.rows.find(r => r.salonId === 'atelier');
+    assert.ok(base.fujiiSales > 0 && base.supplyFee === 0);
+    const viaFujii = await order(otherSalon, sep), viaFit = await order(salonOp, sep);
+    const pick = async id => (await e.call('/admin/snapshot', 'GET', undefined, admin, sep)).supplyOrders.find(o => o.id === id);
+    const f = await pick(viaFujii.id), t = await pick(viaFit.id);
+    assert.deepEqual([f.biller, f.feeRate, f.agencyTotal], ['fujii', 0, Math.round(2860 * 0.55) * 2], '藤井企画の仕入値（推定：売価の55%）で F.I.T が藤井企画へ請求');
+    assert.deepEqual([t.biller, t.feeRate, t.agencyTotal], ['fit', 15, 0], '仕入れの紹介料率');
+    // 月の途中で請求元を変えても、その月は同じ請求元（変更は、まだ仕入れのない次の月から）
+    await e.call('/admin/salons/atelier', 'PATCH', { supplyBiller: 'fit' }, admin, sep);
+    assert.equal((await pick((await order(otherSalon, '2026-09-20T03:00:00.000Z', 1)).id)).biller, 'fujii');
+    const november = await pick((await order(otherSalon, '2026-11-02T03:00:00.000Z', 1)).id);
+    assert.deepEqual([november.biller, november.feeRate], ['fit', 15]);
+    // 紹介料の集計：藤井企画の仕入れは紹介料なし・藤井企画の粗利、F.I.T の仕入れは紹介料
+    const ref = (await e.call('/admin/snapshot', 'GET', undefined, admin, refAt)).referrals.current;
+    const ra = ref.rows.find(r => r.salonId === 'atelier'), rl = ref.rows.find(r => r.salonId === 'lumiere');
+    assert.deepEqual([ra.fujiiSales - base.fujiiSales, ra.agencyTotal - base.agencyTotal, ra.fujiiMargin - base.fujiiMargin, ra.supplyFee], [1859 * 3, 1573 * 3, (1859 - 1573) * 3, 0]);
+    assert.equal(ra.fujiiIncome, ra.fee + ra.fujiiMargin, '藤井企画の受け取り ＝ 紹介料 ＋ 仕入れの粗利');
+    const lumiereSep = (await e.call('/admin/snapshot', 'GET', undefined, admin, sep)).supplyOrders.filter(o => o.salonId === 'lumiere' && o.billingMonth === '2026-09' && o.status !== 'cancelled');
+    assert.equal(rl.supplyFee, lumiereSep.reduce((n, o) => n + Math.round(o.subtotal * o.feeRate / 100), 0), 'F.I.T が請求元の仕入れには、注文時の仕入れの紹介料率');
+    // 締め：F.I.T は F.I.T が請求元の加盟店、藤井企画は藤井企画が請求元の加盟店
+    const byDealer = (await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, dealer, '2026-10-03T03:00:00.000Z')).created;
+    assert.ok(byDealer.some(i => i.salonId === 'lumiere') && !byDealer.some(i => i.salonId === 'atelier'));
+    const byFujii = (await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, admin, '2026-10-03T03:00:00.000Z')).created;
+    assert.deepEqual(byFujii.map(i => [i.salonId, i.biller, i.orderCount]), [['atelier', 'fujii', base.supplyOrders + 2]]);
+    const detail = await e.call('/supply/invoices/' + byFujii[0].id, 'GET', undefined, otherSalon);
+    assert.equal(detail.issuer.name, '藤井企画', '請求書の発行元は藤井企画');
+    await assert.rejects(e.call('/supply/invoices/' + byFujii[0].id, 'GET', undefined, dealer), /藤井企画/, '藤井企画が加盟店へ出す請求書は F.I.T に見せない');
+    const dealerList = (await e.call('/admin/snapshot', 'GET', undefined, dealer)).invoices;
+    assert.ok(dealerList.length && dealerList.every(i => i.biller === 'fit'));
+    assert.ok((await e.call('/admin/snapshot', 'GET', undefined, admin)).invoices.some(i => i.biller === 'fit'), '藤井企画はすべて見られる');
+    await assert.rejects(e.call('/admin/invoices/' + byFujii[0].id, 'PATCH', { status: 'paid' }, dealer), /藤井企画/);
+    assert.equal((await e.call('/admin/invoices/' + byFujii[0].id, 'PATCH', { status: 'paid' }, admin)).status, 'paid');
+    await assert.rejects(e.call('/admin/invoices/' + byDealer[0].id, 'PATCH', { status: 'paid' }, admin), /F.I.T/);
   });
 
   run('admin sets the wholesale price; dealers cannot', async e => {

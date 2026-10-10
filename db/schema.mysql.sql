@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS salons (
   area VARCHAR(60) NOT NULL DEFAULT '', description VARCHAR(200) NOT NULL DEFAULT '',
   prefecture VARCHAR(10) NOT NULL DEFAULT '', city VARCHAR(50) NOT NULL DEFAULT '', street VARCHAR(100) NOT NULL DEFAULT '', building VARCHAR(100) NOT NULL DEFAULT '',
   phone VARCHAR(15) NOT NULL DEFAULT '', hours VARCHAR(50) NOT NULL DEFAULT '', holiday VARCHAR(50) NOT NULL DEFAULT '', notes VARCHAR(500) NOT NULL DEFAULT '',
-  fee_rate INT NOT NULL DEFAULT 5, enabled TINYINT(1) NOT NULL DEFAULT 1,
+  fee_rate INT NOT NULL DEFAULT 10, supply_fee_rate INT NOT NULL DEFAULT 15, supply_biller VARCHAR(10) NOT NULL DEFAULT 'fujii', enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   CONSTRAINT salons_fee_rate CHECK (fee_rate BETWEEN 0 AND 30)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS supply_orders (
   ship_name VARCHAR(100) NOT NULL, ship_address VARCHAR(300) NOT NULL, note VARCHAR(200) NOT NULL DEFAULT '',
   carrier VARCHAR(40) NOT NULL DEFAULT '', tracking VARCHAR(60) NOT NULL DEFAULT '', shipped_at VARCHAR(30) NULL, delivered_at VARCHAR(30) NULL,
   billing_month CHAR(7) NOT NULL, invoice_id VARCHAR(40) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, fee_rate INT NOT NULL DEFAULT 0,
+  biller VARCHAR(10) NOT NULL DEFAULT 'fit', agency_total INT NOT NULL DEFAULT 0,
   ordered_on CHAR(10) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY supply_orders_salon (salon_id, created_at), KEY supply_orders_billing (billing_month, salon_id),
   CONSTRAINT supply_orders_source CHECK (source IN ('manual','reorder','suggestion','subscription')),
@@ -212,7 +213,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   bill_to_name VARCHAR(100) NOT NULL, bill_to_address VARCHAR(300) NOT NULL, salon_name VARCHAR(100) NOT NULL,
   issued_on CHAR(10) NOT NULL, due_on CHAR(10) NOT NULL, order_count INT NOT NULL,
   subtotal INT NOT NULL, tax_total INT NOT NULL, total INT NOT NULL, status VARCHAR(10) NOT NULL, paid_at VARCHAR(30) NULL,
-  created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
+  created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, biller VARCHAR(10) NOT NULL DEFAULT 'fit',
   UNIQUE KEY invoices_salon_month (salon_id, billing_month), CONSTRAINT invoices_status CHECK (status IN ('issued','paid')),
   FOREIGN KEY (salon_id) REFERENCES salons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

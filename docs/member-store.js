@@ -1,6 +1,6 @@
 // Demonstration membership. Pages storage is not a security boundary.
-import { privacyConsent } from './privacy.js?v=d64b90157f';
-import { nameInput, kanaInput, phoneInput, isCompleteName, isCompleteKana } from './person.js?v=d64b90157f';
+import { privacyConsent } from './privacy.js?v=e2ee89ba4b';
+import { nameInput, kanaInput, phoneInput, isCompleteName, isCompleteKana } from './person.js?v=e2ee89ba4b';
 // セッションは最後の操作から30分で切れる（仕様書 3.1.2）。操作のたびに期限を延ばす。
 export const SESSION_IDLE = 30 * 60 * 1000;
 // Cookie の寿命（ブラウザ側の上限）。実際の有効期限はサーバーが最後の操作から30分で判定する。

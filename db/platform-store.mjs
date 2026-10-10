@@ -6,6 +6,7 @@ import {
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
   settlement, requireOperator, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
   addressInput, sortAddresses, addressView, cardView, sortCards, shipmentLabel, MAX_ADDRESSES,
+  salonTerms,
 } from '../dist/platform-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from '../dist/payment-core.js';
 import { validateProfile, profileComplete } from '../dist/member-store.js';
@@ -30,7 +31,7 @@ const READ_ONLY = new Set(['/quote', '/admin/sales']);
 const QUIET = new Set(['/cart', '/favorites', '/supply/favorites', '/admin/exports', '/admin/shipping-csv']);
 const quiet = route => QUIET.has(route) || /^\/(addresses|payment-methods)(\/|$)/.test(route);
 const SNAPSHOT_LIMIT = 1000;
-export const SCHEMA_VERSION = '8';
+export const SCHEMA_VERSION = '9';
 const KEY_CHECK = 'salon-station:key-check';
 // アクセス記録は追記のみ（SQLite）。MySQL ではアプリ用ユーザーに UPDATE / DELETE の権限を与えない（db/grants.mysql.sql）。
 const APPEND_ONLY_SQLITE = `CREATE TRIGGER IF NOT EXISTS data_access_logs_no_update BEFORE UPDATE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は変更できません'); END;
@@ -41,7 +42,7 @@ CREATE TRIGGER IF NOT EXISTS data_access_logs_no_delete BEFORE DELETE ON data_ac
 export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypto, images }) {
   const c = fieldCrypto || createFieldCrypto(null);
   // ---- 読み出し（行 → 画面に渡す形）
-  const salonFrom = (r, staff) => ({ id: r.id, name: r.name, area: r.area, description: r.description, owner: r.owner, prefecture: r.prefecture, city: r.city, street: r.street, building: r.building, phone: r.phone, hours: r.hours, holiday: r.holiday, notes: r.notes, feeRate: num(r.fee_rate), enabled: bool(r.enabled), staff });
+  const salonFrom = (r, staff) => ({ id: r.id, name: r.name, area: r.area, description: r.description, owner: r.owner, prefecture: r.prefecture, city: r.city, street: r.street, building: r.building, phone: r.phone, hours: r.hours, holiday: r.holiday, notes: r.notes, feeRate: num(r.fee_rate), supplyFeeRate: num(r.supply_fee_rate), supplyBiller: r.supply_biller || 'fujii', enabled: bool(r.enabled), staff });
   async function loadSalons(q, { enabledOnly = false, ids } = {}) {
     if (ids && !ids.length) return [];
     const where = [], params = [];
@@ -71,8 +72,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const month = jst(now).slice(0, 7), previous = monthBefore(month), salons = await loadSalons(q, {});
     const orders = (await q.all(`SELECT o.id, o.salon_id, o.status, o.subtotal, o.fee, o.created_at, (SELECT COALESCE(SUM((i.unit_price-i.unit_wholesale)*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS share FROM orders o WHERE o.ordered_on>=? AND o.ordered_on<=?`, [`${previous}-01`, `${month}-31`]))
       .map(r => ({ salonId: r.salon_id, status: r.status, subtotal: num(r.subtotal), fee: num(r.fee), createdAt: r.created_at, share: num(r.share) }));
-    const supplyOrders = (await q.all('SELECT salon_id, status, subtotal, fee_rate, billing_month FROM supply_orders WHERE billing_month IN (?, ?)', [previous, month]))
-      .map(r => ({ salonId: r.salon_id, status: r.status, subtotal: num(r.subtotal), feeRate: num(r.fee_rate), billingMonth: r.billing_month }));
+    const supplyOrders = (await q.all('SELECT salon_id, status, subtotal, fee_rate, billing_month, biller, agency_total FROM supply_orders WHERE billing_month IN (?, ?)', [previous, month]))
+      .map(r => ({ salonId: r.salon_id, status: r.status, subtotal: num(r.subtotal), feeRate: num(r.fee_rate), billingMonth: r.billing_month, biller: r.biller || 'fit', agencyTotal: num(r.agency_total) }));
     return { current: referralSummary({ month, salons, orders, supplyOrders }), previous: referralSummary({ month: previous, salons, orders, supplyOrders }) };
   }
 
@@ -340,7 +341,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     if (route === '/bootstrap' && method === 'GET') {
       const products = actor.member || actor.operator ? await loadProducts(q, { enabledOnly: true }) : [];
       const categories = products.length ? (await categoryRows(q)).filter(r => products.some(p => p.category === r.name)).map(r => ({ id: r.id, name: r.name })) : [];
-      return { closed: true, products, categories, salons: (await loadSalons(q, { enabledOnly: true })).map(({ feeRate, notes, ...s }) => s), dealers: await loadDealers(q), revision: await revision(q) };
+      return { closed: true, products, categories, salons: (await loadSalons(q, { enabledOnly: true })).map(({ feeRate, supplyFeeRate, supplyBiller, notes, ...s }) => s), dealers: await loadDealers(q), revision: await revision(q) };
     }
     if (route === '/profile' && method === 'GET') {
       if (!actor.member) return null;
@@ -610,9 +611,9 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     }
     if (route === '/admin/salons' && method === 'POST') {
       const op = requireOperator(actor, ['admin']);
-      const s = { ...salonInput(input), owner: required(input?.owner, 100), feeRate: int(input?.feeRate ?? 5, 0, 30), enabled: input?.enabled !== false };
+      const s = { ...salonInput(input), owner: required(input?.owner, 100), ...salonTerms(input), enabled: input?.enabled !== false };
       const staff = staffList(input?.staff), id = await nextSalonId(q);
-      await q.run(`INSERT INTO salons (id, ${SALON_COLUMNS.join(', ')}, fee_rate, enabled, created_at, updated_at) VALUES (?, ${marks(SALON_COLUMNS)}, ?, ?, ?, ?)`, [id, ...SALON_COLUMNS.map(k => s[k] ?? ''), s.feeRate, s.enabled ? 1 : 0, now, now]);
+      await q.run(`INSERT INTO salons (id, ${SALON_COLUMNS.join(', ')}, fee_rate, supply_fee_rate, supply_biller, enabled, created_at, updated_at) VALUES (?, ${marks(SALON_COLUMNS)}, ?, ?, ?, ?, ?, ?)`, [id, ...SALON_COLUMNS.map(k => s[k] ?? ''), s.feeRate, s.supplyFeeRate, s.supplyBiller, s.enabled ? 1 : 0, now, now]);
       await saveStaff(q, id, staff);
       await audit(q, op, '店舗を登録', id, now);
       return salonById(q, id);
@@ -663,10 +664,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     if (salonAction && method === 'PATCH') {
       const op = requireOperator(actor, ['admin', 'salon']), salon = await salonById(q, salonAction[1]);
       if (op.role === 'salon' && op.salonId !== salon.id) fail('他店舗の情報は編集できません。', 403);
-      const update = { ...salonInput({ ...salon, ...input }), owner: salon.owner, feeRate: salon.feeRate, enabled: salon.enabled };
-      if (op.role === 'admin') { update.owner = required(input?.owner ?? salon.owner, 100); update.feeRate = int(input?.feeRate ?? salon.feeRate, 0, 30); if (input?.enabled !== undefined && typeof input.enabled !== 'boolean') fail('受付設定を確認してください。'); update.enabled = input?.enabled ?? salon.enabled; }
-      else if (['owner', 'feeRate', 'enabled', 'staff'].some(k => input?.[k] !== undefined)) fail('サロン担当者は紹介料率・受付設定・販売事業者名を変更できません。', 403);
-      await q.run(`UPDATE salons SET ${SALON_COLUMNS.map(k => `${k}=?`).join(', ')}, fee_rate=?, enabled=?, updated_at=? WHERE id=?`, [...SALON_COLUMNS.map(k => update[k] ?? ''), update.feeRate, update.enabled ? 1 : 0, now, salon.id]);
+      const update = { ...salonInput({ ...salon, ...input }), owner: salon.owner, feeRate: salon.feeRate, supplyFeeRate: salon.supplyFeeRate, supplyBiller: salon.supplyBiller, enabled: salon.enabled };
+      if (op.role === 'admin') { update.owner = required(input?.owner ?? salon.owner, 100); Object.assign(update, salonTerms(input, salon)); if (input?.enabled !== undefined && typeof input.enabled !== 'boolean') fail('受付設定を確認してください。'); update.enabled = input?.enabled ?? salon.enabled; }
+      else if (['owner', 'feeRate', 'supplyFeeRate', 'supplyBiller', 'enabled', 'staff'].some(k => input?.[k] !== undefined)) fail('サロン担当者は紹介料率・仕入れの請求元・受付設定・販売事業者名を変更できません。', 403);
+      await q.run(`UPDATE salons SET ${SALON_COLUMNS.map(k => `${k}=?`).join(', ')}, fee_rate=?, supply_fee_rate=?, supply_biller=?, enabled=?, updated_at=? WHERE id=?`, [...SALON_COLUMNS.map(k => update[k] ?? ''), update.feeRate, update.supplyFeeRate, update.supplyBiller, update.enabled ? 1 : 0, now, salon.id]);
       if (op.role === 'admin' && input?.staff !== undefined) await saveStaff(q, salon.id, staffList(input.staff, salon.staff));
       await audit(q, op, op.role === 'admin' ? '店舗設定を更新' : 'サロン情報を編集', salon.id, now);
       return salonById(q, salon.id);
@@ -814,6 +815,12 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (await db.tableExists('orders') && (await db.tableColumns('orders')).includes('ship_name') && !(await db.tableColumns('orders')).includes('payment_method')) await upgradeOrdersV5();
       const addColumn = async (table, column, sqliteType, mysqlType) => { if (await db.tableExists(table) && !(await db.tableColumns(table)).includes(column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${db.dialect === 'mysql' ? mysqlType : sqliteType}`); };
       await addColumn('member_addresses', 'phone', "TEXT NOT NULL DEFAULT ''", "VARCHAR(256) NOT NULL DEFAULT '' AFTER address");
+      // 版9：紹介料率を EC と仕入れで分け、仕入れの請求元を加盟店ごとに（以前の加盟店は藤井企画。以前の仕入れ・請求書は F.I.T）
+      await addColumn('salons', 'supply_fee_rate', 'INTEGER NOT NULL DEFAULT 15', 'INT NOT NULL DEFAULT 15 AFTER fee_rate');
+      await addColumn('salons', 'supply_biller', "TEXT NOT NULL DEFAULT 'fujii'", "VARCHAR(10) NOT NULL DEFAULT 'fujii' AFTER supply_fee_rate");
+      await addColumn('supply_orders', 'biller', "TEXT NOT NULL DEFAULT 'fit'", "VARCHAR(10) NOT NULL DEFAULT 'fit' AFTER fee_rate");
+      await addColumn('supply_orders', 'agency_total', 'INTEGER NOT NULL DEFAULT 0', 'INT NOT NULL DEFAULT 0 AFTER biller');
+      await addColumn('invoices', 'biller', "TEXT NOT NULL DEFAULT 'fit'", "VARCHAR(10) NOT NULL DEFAULT 'fit'");
       // 版8：注文明細に注文時の卸価格、加盟店の発注に紹介料率（いまの商品の卸価格・サロンの率で補う）
       const addedWholesale8 = await db.tableExists('order_items') && !(await db.tableColumns('order_items')).includes('unit_wholesale');
       const addedFeeRate8 = await db.tableExists('supply_orders') && !(await db.tableColumns('supply_orders')).includes('fee_rate');

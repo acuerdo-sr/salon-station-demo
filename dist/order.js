@@ -146,7 +146,7 @@ function ecTab() {
     </section>
     <section class="order-section"><h2>よく売れている商品（${monthLabel(e.month)}）</h2><p class="subtle-note">店頭の在庫や、次の発注の目安にご利用ください。</p>
     ${e.topProducts.length ? e.topProducts.map((t, i) => { const product = productOf(t.productId); return `<article class="supply-order ec-rank"><span class="rank-num">${i + 1}</span><div><b>${esc(t.name)}</b><small>${t.quantity}点・${money(t.sales)}</small></div>${product && product.stock > (cart[product.id] || 0) ? `<button class="btn soft small" data-ec-add="${esc(product.id)}">発注に追加</button>` : ''}</article>`; }).join('') : empty('今月のEC注文はまだありません', 'QRコードや紹介リンクから、お客様にECをご案内ください。')}</section>
-    ${ecOrders()}<p class="subtle-note">お客様の代金は F.I.Tソリューション が受け取り、取り分（売価 − 卸価格。店頭で売ったときと同じ額）を F.I.Tソリューション から貴店へお支払いします。仕入れの請求と相殺することもできます。キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
+    ${ecOrders()}<p class="subtle-note">お客様の代金は F.I.Tソリューション が受け取り、取り分（売価 − 卸価格。店頭で売ったときと同じ額）を F.I.Tソリューション から貴店へお支払いします。${ws.salon.biller === 'fit' ? '仕入れの請求と相殺することもできます。' : ''}キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
 }
 // ---- 担当スタッフ：お客様が会員登録・マイページで選ぶスタッフの追加・名前の変更・並び替え・削除（管理画面の「担当スタッフ」と同じ操作）
 const staffUrl = (id = '') => `/admin/salons/${encodeURIComponent(operator.salonId)}/staff${id ? '/' + encodeURIComponent(id) : ''}`;
@@ -230,13 +230,13 @@ function subscriptionsTab() {
       <div class="form-actions"><button class="btn ${s.active ? 'outline' : 'primary'} small" data-sub-toggle="${esc(s.id)}" data-active="${!s.active}">${s.active ? '停止する' : '再開する'}</button></div></article>`).join('') : empty('定期発注はまだありません', 'よく使う商品を定期発注にすると、発注の手間が減ります。')}`;
 }
 function invoicesTab() {
-  return `${secHead('Invoice', '請求書')}${ws.invoices.length ? ws.invoices.map(i => `<article class="supply-order"><div class="between"><div><b>${esc(i.month.replace('-', '年'))}月分</b><small>${esc(i.id)}・発注${i.orderCount}件</small></div>${badge(i.status, invoiceStatusLabels[i.status])}</div><div class="between"><span>${money(i.total)}<small class="subtle-note">　支払期限 ${esc(i.dueOn.replaceAll('-', '/'))}</small></span><button class="btn outline small" data-invoice="${esc(i.id)}">請求書を表示</button></div></article>`).join('') : empty('請求書はまだありません', '月末に締めて、翌月に1か月分をまとめてご請求します。')}`;
+  return `${secHead('Invoice', '請求書')}${ws.invoices.length ? ws.invoices.map(i => `<article class="supply-order"><div class="between"><div><b>${esc(i.month.replace('-', '年'))}月分</b><small>${esc(i.id)}・発注${i.orderCount}件・請求元 ${esc(i.biller === 'fujii' ? '藤井企画' : 'F.I.Tソリューション')}</small></div>${badge(i.status, invoiceStatusLabels[i.status])}</div><div class="between"><span>${money(i.total)}<small class="subtle-note">　支払期限 ${esc(i.dueOn.replaceAll('-', '/'))}</small></span><button class="btn outline small" data-invoice="${esc(i.id)}">請求書を表示</button></div></article>`).join('') : empty('請求書はまだありません', `月末に締めて、翌月に${esc(ws.salon.billerName || '')}から1か月分をまとめてご請求します。`)}`;
 }
 function review() {
   const t = cartTotal();
   modal('発注内容の確認', `<div class="stack">${cartLines().map(p => `<div class="order-line"><div class="line-copy"><strong>${esc(p.name)}</strong><br><small>品番 ${esc(p.sku)}・${money(p.wholesalePrice)} × ${p.quantity}</small></div><span>${money(p.wholesalePrice * p.quantity)}</span></div>`).join('')}
     <div class="total-list"><div><span>商品小計（税込）</span><span>${money(t.subtotal)}</span></div><div><span>送料（税込）</span><span>${t.shipping ? money(t.shipping) : '無料'}</span></div><div class="grand"><span>合計</span><strong>${money(t.total)}</strong></div></div>
-    <p class="subtle-note">出荷予定：${esc(shipEstimate(1).label)}（デモ設定。平日15時までのご注文は当日出荷）<br>お届け先：${esc(ws.salon.name)}（${esc(ws.salon.address)}）<br>お支払い：月末締め・翌月末までにお振込み（請求書払い）</p>
+    <p class="subtle-note">出荷予定：${esc(shipEstimate(1).label)}（デモ設定。平日15時までのご注文は当日出荷）<br>お届け先：${esc(ws.salon.name)}（${esc(ws.salon.address)}）<br>お支払い：月末締め・翌月末までにお振込み（請求書払い・請求元 ${esc(ws.salon.billerName || '')}）</p>
     <form id="supply-form" class="stack"><label>本部への連絡（任意）<textarea name="note" maxlength="200" rows="2" placeholder="例：次回の講習会で使います"></textarea></label><div id="form-error" class="error" role="alert"></div><button class="btn primary full" type="submit">この内容で発注する</button></form>
     <details class="subscribe-box"><summary>この内容を定期発注にする</summary><form id="subscription-form" class="stack"><div class="form-grid"><label>間隔<select name="interval">${Object.entries(supplyIntervals).map(([k, v]) => `<option value="${k}" ${k === 'biweekly' ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label>初回の発注日<input name="startOn" type="date" min="${today()}" value="${addDays(today(), 1)}" required></label></div><button class="btn outline full" type="submit">定期発注を登録する</button></form></details></div>`);
 }
