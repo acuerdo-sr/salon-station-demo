@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators, includedTax } from '../dist/platform-core.js';
-import { marginFor, nextRunOn, invoiceDueOn, supplySuggestions, addDays } from '../dist/supply-core.js';
+import { referralSummary, nextRunOn, invoiceDueOn, supplySuggestions, addDays } from '../dist/supply-core.js';
 import { engines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z'; // 2026-10-06 12:00 JST
@@ -12,9 +12,15 @@ const later = days => new Date(Date.parse(now) + days * 86400000).toISOString();
 const stockOf = async (e, id) => (await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === id).stock;
 const supplyOrder = (e, items, extra = {}, at = now, effects = []) => e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items, ...extra }, salonOp, at, effects);
 
-test('pure rules: margins, schedule dates, invoice due dates and suggestions', () => {
-  assert.deepEqual(marginFor({ id: 'x', name: 'x', price: 2860, cost: 1716, wholesalePrice: 1859 }, 5), { productId: 'x', name: 'x', price: 2860, cost: 1716, wholesalePrice: 1859, fee: 143, ecTake: 1001, storeTake: 1001, difference: 0 });
-  assert.equal(marginFor({ id: 'x', name: 'x', price: 3000, cost: 1800, wholesalePrice: 2100 }, 10).difference, 1200 - 300 - 900);
+test('pure rules: referral fees, schedule dates, invoice due dates and suggestions', () => {
+  // 紹介料（F.I.Tソリューション → 藤井企画）：加盟店ごとに（EC売上＋仕入れ）× 注文時の率。美容室の取り分は売価−卸価格
+  const r = referralSummary({ month: '2026-10', salons: [{ id: 's1', name: 'A', feeRate: 5 }, { id: 's2', name: 'B', feeRate: 8 }],
+    orders: [{ salonId: 's1', status: 'delivered', subtotal: 2860, fee: 143, createdAt: '2026-10-05T01:00:00.000Z', items: [{ price: 2860, wholesalePrice: 1859, quantity: 1 }] },
+      { salonId: 's1', status: 'cancelled', subtotal: 9999, fee: 500, createdAt: '2026-10-05T01:00:00.000Z', items: [] },
+      { salonId: 's1', status: 'ordered', subtotal: 1000, fee: 50, createdAt: '2026-09-30T16:00:00.000Z', items: [{ price: 1000, wholesalePrice: 650, quantity: 1 }] }],
+    supplyOrders: [{ salonId: 's1', status: 'delivered', subtotal: 20000, feeRate: 5, billingMonth: '2026-10' }, { salonId: 's2', status: 'ordered', subtotal: 10001, feeRate: 8, billingMonth: '2026-10' }, { salonId: 's2', status: 'cancelled', subtotal: 5000, feeRate: 8, billingMonth: '2026-10' }] });
+  assert.deepEqual(r.rows.map(x => [x.salonId, x.ecSales, x.share, x.supplySales, x.ecFee, x.supplyFee, x.fee]), [['s1', 3860, 1001 + 350, 20000, 193, 1000, 1193], ['s2', 0, 0, 10001, 0, 800, 800]], '日本時間の10月1日 1:00 の注文は10月');
+  assert.equal(r.total.fee, 1993);
   assert.equal(nextRunOn('2026-01-31', 'monthly'), '2026-02-28'); assert.equal(nextRunOn('2026-10-06', 'weekly'), '2026-10-13'); assert.equal(nextRunOn('2026-12-20', 'biweekly'), '2027-01-03');
   assert.equal(invoiceDueOn('2026-09'), '2026-10-31'); assert.equal(invoiceDueOn('2026-12'), '2027-01-31');
   const p = [{ id: 'a', name: 'A', enabled: true, stock: 3, wholesalePrice: 100 }];

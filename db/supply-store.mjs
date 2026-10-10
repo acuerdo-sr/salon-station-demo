@@ -14,7 +14,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     id: r.id, salonId: r.salon_id, salonName: r.ship_name, operatorId: r.operator_id, operatorName: r.operator_name, source: r.source, subscriptionId: r.subscription_id || null, status: r.status,
     items: items.map(i => ({ id: i.product_id, sku: i.sku, name: i.name, size: i.size, image: i.image, unitPrice: num(i.unit_price), quantity: num(i.quantity), amount: num(i.unit_price) * num(i.quantity) })),
     subtotal: num(r.subtotal), shipping: num(r.shipping), total: num(r.total), taxTotal: num(r.tax_total), shipTo: { name: r.ship_name, address: r.ship_address }, note: r.note,
-    carrier: r.carrier, tracking: r.tracking, shippedAt: r.shipped_at || '', deliveredAt: r.delivered_at || '', billingMonth: r.billing_month, invoiceId: r.invoice_id || '', orderedOn: r.ordered_on, createdAt: r.created_at, stockRestored: Boolean(num(r.stock_restored)),
+    carrier: r.carrier, tracking: r.tracking, shippedAt: r.shipped_at || '', deliveredAt: r.delivered_at || '', billingMonth: r.billing_month, invoiceId: r.invoice_id || '', orderedOn: r.ordered_on, createdAt: r.created_at, feeRate: num(r.fee_rate), stockRestored: Boolean(num(r.stock_restored)),
   });
   async function loadSupplyOrders(q, where, params, limit) {
     const rows = await q.all(`SELECT * FROM supply_orders${where ? ' WHERE ' + where : ''} ORDER BY created_at DESC, id DESC${limit ? ` LIMIT ${Number(limit)}` : ''}`, params);
@@ -48,9 +48,9 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     }
     const t = supplyTotals(items);
     await q.run(`INSERT INTO supply_orders (id, request_key, salon_id, operator_id, operator_name, source, subscription_id, status, subtotal, shipping, total, tax_total,
-      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'ordered', ?, ?, ?, ?, ?, ?, ?, '', '', NULL, NULL, ?, NULL, 0, ?, ?, ?)`,
-    [id, key, salonId, op.id, op.name, source, subId, t.subtotal, t.shipping, t.total, t.taxTotal, salon.name, salonAddress(salon), note, jst(now).slice(0, 7), jst(now).slice(0, 10), now, now]);
+      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ordered', ?, ?, ?, ?, ?, ?, ?, '', '', NULL, NULL, ?, NULL, 0, ?, ?, ?, ?)`,
+    [id, key, salonId, op.id, op.name, source, subId, t.subtotal, t.shipping, t.total, t.taxTotal, salon.name, salonAddress(salon), note, jst(now).slice(0, 7), num(salon.fee_rate), jst(now).slice(0, 10), now, now]);
     for (const [i, l] of items.entries()) await q.run('INSERT INTO supply_order_items (supply_order_id, line_no, product_id, sku, name, size, image, unit_price, quantity, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10)', [id, i + 1, l.id, l.sku, l.name, l.size, l.image, l.unitPrice, l.quantity]);
     await audit(q, op, source === 'subscription' ? '定期発注を作成' : '加盟店発注を受付', id, now);
     effects.push({ type: 'supply_placed', supplyOrderId: id, salonId });
@@ -62,13 +62,13 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     const history = (await q.all("SELECT so.ordered_on, si.product_id, si.quantity FROM supply_order_items si JOIN supply_orders so ON so.id=si.supply_order_id WHERE so.salon_id=? AND so.status<>'cancelled' AND so.ordered_on>=?", [salon.id, addDays(today, -180)])).map(r => ({ productId: r.product_id, orderedOn: r.ordered_on, quantity: num(r.quantity) }));
     // 店販EC（今月・前月）。お客様の情報は渡さず、集計値だけを渡す（注文日は日本時間）
     const month = jst(now).slice(0, 7), from = `${monthBefore(month)}-01`, to = `${month}-31`, active = "o.status NOT IN ('cancelled','returned')";
-    const sold = await q.all(`SELECT o.member_id, o.subtotal, o.fee, o.ordered_on, (SELECT COALESCE(SUM(i.unit_cost*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS purchase FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active}`, [salon.id, from, to]);
+    const sold = await q.all(`SELECT o.member_id, o.subtotal, o.fee, o.ordered_on, (SELECT COALESCE(SUM((i.unit_price-i.unit_wholesale)*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS share FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active}`, [salon.id, from, to]);
     const items = await q.all(`SELECT i.product_id, MAX(i.name) AS name, SUM(i.quantity) AS quantity, SUM(i.unit_price*i.quantity) AS sales FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND ${active} GROUP BY i.product_id`, [salon.id, `${month}-01`, to]);
     const [stats] = await customerStats(q, [{ id: salon.id, name: salon.name }], now);
     const shown = products.map(({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag, summary }) => ({ id, brand, name, category, size, image, sku, price, wholesalePrice, stock, tag: tag || '', summary: summary || '' }));
     const favorites = (await q.all('SELECT product_id FROM supply_favorites WHERE salon_id=? ORDER BY created_at, product_id', [salon.id])).map(r => r.product_id).filter(id => shown.some(p => p.id === id));
     const ec = ecSummary({ month, products: shown, members: { total: stats.members, newThisMonth: stats.newThisMonth, lineLinked: stats.lineLinked },
-      orders: sold.map(o => ({ month: o.ordered_on.slice(0, 7), memberId: o.member_id, subtotal: num(o.subtotal), purchase: num(o.purchase), fee: num(o.fee) })),
+      orders: sold.map(o => ({ month: o.ordered_on.slice(0, 7), memberId: o.member_id, subtotal: num(o.subtotal), share: num(o.share) })),
       items: items.map(i => ({ productId: i.product_id, name: i.name, quantity: num(i.quantity), sales: num(i.sales) })) });
     return {
       salon: { id: salon.id, name: salon.name, address: salonAddress(salon), feeRate: num(salon.fee_rate) },
@@ -78,8 +78,8 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     };
   }
   async function ecProceeds(q, salonId, month) {
-    const rows = await q.all("SELECT o.subtotal, o.fee, (SELECT SUM(i.unit_cost*i.quantity) FROM order_items i WHERE i.order_id=o.id) AS purchase FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND o.status NOT IN ('cancelled','returned')", [salonId, `${month}-01`, `${month}-31`]);
-    return rows.reduce((s, r) => s + num(r.subtotal) - num(r.purchase) - num(r.fee), 0);
+    const rows = await q.all("SELECT (SELECT COALESCE(SUM((i.unit_price-i.unit_wholesale)*i.quantity), 0) FROM order_items i WHERE i.order_id=o.id) AS share FROM orders o WHERE o.salon_id=? AND o.ordered_on>=? AND o.ordered_on<=? AND o.status NOT IN ('cancelled','returned')", [salonId, `${month}-01`, `${month}-31`]);
+    return rows.reduce((s, r) => s + num(r.share), 0);
   }
   async function invoiceDetail(q, inv) {
     const orders = (await loadSupplyOrders(q, 'invoice_id=?', [inv.id])).sort((a, b) => a.createdAt.localeCompare(b.createdAt));

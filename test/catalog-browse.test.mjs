@@ -76,3 +76,13 @@ test('older browser data with the SENA and BOTANICA dealers is moved to BICMA, t
   assert.equal(state.purchaseOrders[0].dealerId, 'bicma'); assert.equal(state.orders[0].items[0].dealerId, 'bicma');
   assert.equal(migrate(state, products), false, '2回目は何もしない');
 });
+
+test('older browser data gains the wholesale price on order lines and the referral rate on franchisee orders', () => {
+  const state = createPlatform(products.slice(0, 6), '2026-10-09T03:00:00.000Z');
+  const order = state.orders[0]; for (const i of order.items) delete i.wholesalePrice;
+  state.supplyOrders = [{ id: 'WO-1', salonId: 'lumiere', status: 'delivered', subtotal: 10000, items: [] }];
+  assert.equal(migrate(state, products), true);
+  assert.ok(order.items.every(i => i.wholesalePrice === state.products.find(p => p.id === i.id).wholesalePrice), '美容室の取り分（売価−卸価格）の計算に使う');
+  assert.equal(state.supplyOrders[0].feeRate, state.salons.find(s => s.id === 'lumiere').feeRate, '紹介料率');
+  assert.equal(migrate(state, products), false);
+});

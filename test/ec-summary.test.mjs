@@ -51,7 +51,7 @@ for (const [name, create] of engines(now)) {
     // 売上集計（美容室）と同じ数字
     const report = await e.call('/admin/sales', 'POST', { unit: 'range', from: '2026-10-01', to: '2026-10-31' }, salonOp, now);
     assert.deepEqual({ sales: report.total.sales, orders: report.total.orders, customers: report.total.customers }, { sales: after.current.sales, orders: after.current.orders, customers: after.current.customers });
-    // 取り分は精算（商品売上 − 仕入原価 − 運用料）と同じ
+    // 取り分は精算（売価 − 卸価格）と同じ
     const settlements = (await e.call('/admin/snapshot', 'GET', undefined, salonOp, now)).settlements;
     const proceeds = month => settlements.filter(s => s.salonId === 'lumiere' && jst(s.at).slice(0, 7) === month).reduce((sum, s) => sum + s.proceeds, 0);
     assert.equal(after.current.proceeds, proceeds('2026-10')); assert.equal(after.previous.proceeds, proceeds('2026-09'));

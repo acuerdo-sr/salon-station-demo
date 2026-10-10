@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 CREATE TABLE IF NOT EXISTS order_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, order_id VARCHAR(40) NOT NULL, purchase_order_id VARCHAR(50) NOT NULL, line_no INT NOT NULL,
   product_id VARCHAR(40) NOT NULL, sku VARCHAR(40) NOT NULL, name VARCHAR(100) NOT NULL, size VARCHAR(40) NOT NULL DEFAULT '', image VARCHAR(255) NOT NULL DEFAULT '',
-  unit_price INT NOT NULL, unit_cost INT NOT NULL, quantity INT NOT NULL, tax_rate INT NOT NULL, dealer_id VARCHAR(40) NOT NULL,
+  unit_price INT NOT NULL, unit_cost INT NOT NULL, unit_wholesale INT NOT NULL DEFAULT 0, quantity INT NOT NULL, tax_rate INT NOT NULL, dealer_id VARCHAR(40) NOT NULL,
   KEY order_items_order (order_id, line_no), CONSTRAINT order_items_quantity CHECK (quantity BETWEEN 1 AND 99),
   FOREIGN KEY (order_id) REFERENCES orders(id), FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS supply_orders (
   status VARCHAR(20) NOT NULL, subtotal INT NOT NULL, shipping INT NOT NULL, total INT NOT NULL, tax_total INT NOT NULL,
   ship_name VARCHAR(100) NOT NULL, ship_address VARCHAR(300) NOT NULL, note VARCHAR(200) NOT NULL DEFAULT '',
   carrier VARCHAR(40) NOT NULL DEFAULT '', tracking VARCHAR(60) NOT NULL DEFAULT '', shipped_at VARCHAR(30) NULL, delivered_at VARCHAR(30) NULL,
-  billing_month CHAR(7) NOT NULL, invoice_id VARCHAR(40) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0,
+  billing_month CHAR(7) NOT NULL, invoice_id VARCHAR(40) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, fee_rate INT NOT NULL DEFAULT 0,
   ordered_on CHAR(10) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY supply_orders_salon (salon_id, created_at), KEY supply_orders_billing (billing_month, salon_id),
   CONSTRAINT supply_orders_source CHECK (source IN ('manual','reorder','suggestion','subscription')),

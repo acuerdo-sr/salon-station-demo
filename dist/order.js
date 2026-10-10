@@ -137,7 +137,7 @@ function ecOrders() {
 }
 function ecTab() {
   const e = ws.ec, c = e.current, p = e.previous, prev = monthLabel(e.previousMonth);
-  return `${secHead('Salon EC', '店販EC')}<p class="notice">貴店を選んでいるお客様が、ECで購入した分の集計です（${monthLabel(e.month)}1日〜今日。商品代・税込で、送料は含みません）。お客様のお名前は表示しません。お客様ごとの内訳は管理画面の「受注管理」で確認できます。</p>
+  return `${secHead('Salon EC', '店販EC')}<p class="notice">貴店のお客様が、ECで購入した分の集計です（${monthLabel(e.month)}1日〜今日。商品代・税込で、送料は含みません）。ご注文ごとの状況は、下の「お客様のご注文」で確認できます。</p>
     <section class="ec-metrics">
       <article class="metric"><div class="metric-top">店販EC売上</div><div class="metric-value">${money(c.sales)}</div><div class="metric-bottom">${changeText(e)}<br>${prev} ${money(p.sales)}</div></article>
       <article class="metric"><div class="metric-top">サロンの取り分（見込み）</div><div class="metric-value">${money(c.proceeds)}</div><div class="metric-bottom">${prev} ${money(p.proceeds)}</div></article>
@@ -146,7 +146,7 @@ function ecTab() {
     </section>
     <section class="order-section"><h2>よく売れている商品（${monthLabel(e.month)}）</h2><p class="subtle-note">店頭の在庫や、次の発注の目安にご利用ください。</p>
     ${e.topProducts.length ? e.topProducts.map((t, i) => { const product = productOf(t.productId); return `<article class="supply-order ec-rank"><span class="rank-num">${i + 1}</span><div><b>${esc(t.name)}</b><small>${t.quantity}点・${money(t.sales)}</small></div>${product && product.stock > (cart[product.id] || 0) ? `<button class="btn soft small" data-ec-add="${esc(product.id)}">発注に追加</button>` : ''}</article>`; }).join('') : empty('今月のEC注文はまだありません', 'QRコードや紹介リンクから、お客様にECをご案内ください。')}</section>
-    ${ecOrders()}<p class="subtle-note">取り分は「商品売上 − 仕入原価 − 運用料（${ws.salon.feeRate}%）」の見込みです。お支払いや、請求書との相殺の方法は別途ご案内します。キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
+    ${ecOrders()}<p class="subtle-note">お客様の代金は F.I.Tソリューション が受け取り、取り分（売価 − 卸価格。店頭で売ったときと同じ額）を F.I.Tソリューション から貴店へお支払いします。仕入れの請求と相殺することもできます。キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
 }
 // ---- 担当スタッフ：お客様が会員登録・マイページで選ぶスタッフの追加・名前の変更・並び替え・削除（管理画面の「担当スタッフ」と同じ操作）
 const staffUrl = (id = '') => `/admin/salons/${encodeURIComponent(operator.salonId)}/staff${id ? '/' + encodeURIComponent(id) : ''}`;
@@ -189,7 +189,7 @@ function shopTab() {
   return `${secHead('Salon', '店舗・スタッフ')}
     <section class="order-section shop-info"><div class="between"><h2 class="b2b-sub-head">店舗情報</h2><button class="btn outline small" data-shop-edit>編集する</button></div>
       <dl class="detail-list"><dt>店舗名</dt><dd>${esc(s?.name || '')}</dd><dt>住所</dt><dd>${esc(address)}</dd><dt>電話番号</dt><dd>${esc(s?.phone || '')}</dd><dt>営業時間</dt><dd>${esc(s?.hours || '未登録')}</dd><dt>定休日</dt><dd>${esc(s?.holiday || '未登録')}</dd><dt>紹介文</dt><dd>${esc(s?.description || '未登録')}</dd></dl>
-      <p class="subtle-note">お客様のストアの「マイサロン」に表示されます。運用料率・販売事業者名の変更は、管理会社（藤井企画）にご依頼ください。</p></section>
+      <p class="subtle-note">お客様のストアの「マイサロン」に表示されます。紹介料率・販売事業者名の変更は、管理会社（藤井企画）にご依頼ください。</p></section>
     <section class="order-section shop-qr"><h2 class="b2b-sub-head">会員登録用の QR コード</h2><p class="subtle-note">店頭に置いてお客様に読み取っていただくと、貴店のお客様として会員登録の画面が開きます。保存する QR は印刷用の PNG（600×600px）です。</p>
       <div class="shop-qr-body"><img src="${qr.createDataURL(5, 20)}" alt="${esc(s?.name || '')}の会員登録用 QR コード" width="185" height="185"><div class="stack"><div class="copy-row"><input id="salon-url" value="${esc(shopUrl())}" readonly aria-label="会員登録用のリンク"><button class="btn primary" data-copy-url>リンクをコピー</button></div><div class="form-actions"><button class="btn outline" data-download-qr>QR を保存（PNG） ${icon('download')}</button><a class="btn outline" href="${esc(shopUrl())}" target="_blank" rel="noopener">ストアを開く ${icon('external')}</a></div></div></div></section>
     ${staffTab()}`;

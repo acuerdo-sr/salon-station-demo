@@ -91,9 +91,9 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
     }
     for (const [i, item] of (o.items || []).entries()) {
       const po = pos.find(p => p.dealerId === item.dealerId) || pos[0];
-      await tx.run(`INSERT INTO order_items (order_id, purchase_order_id, line_no, product_id, sku, name, size, image, unit_price, unit_cost, quantity, tax_rate, dealer_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?)`,
-      [o.id, po.id, i + 1, item.id, skuOf(item.id), item.name, item.size || '', item.image || '', item.price, item.cost ?? 0, item.quantity, item.dealerId || po.dealerId]);
+      await tx.run(`INSERT INTO order_items (order_id, purchase_order_id, line_no, product_id, sku, name, size, image, unit_price, unit_cost, unit_wholesale, quantity, tax_rate, dealer_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?)`,
+      [o.id, po.id, i + 1, item.id, skuOf(item.id), item.name, item.size || '', item.image || '', item.price, item.cost ?? 0, item.wholesalePrice ?? wholesaleOf(item.price), item.quantity, item.dealerId || po.dealerId]);
     }
     for (const e of o.timeline || []) await tx.run('INSERT INTO order_events (order_id, occurred_at, label) VALUES (?, ?, ?)', [o.id, e.at, e.label]);
     await tx.run("INSERT INTO payments (order_id, provider, provider_payment_id, amount, status, created_at, updated_at) VALUES (?, 'test', ?, ?, ?, ?, ?)", [o.id, `test_${o.id}`, o.total, paymentStatus, o.createdAt, now]);
@@ -109,11 +109,11 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   for (const o of [...(state.supplyOrders || [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     if (!salonIds.has(o.salonId)) continue;
     await tx.run(`INSERT INTO supply_orders (id, request_key, salon_id, operator_id, operator_name, source, subscription_id, status, subtotal, shipping, total, tax_total,
-      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [o.id, o.requestKey || `legacy-${o.id}`, o.salonId, o.operatorId || '', o.operatorName || '', o.source || 'manual', o.subscriptionId || null, o.status, o.subtotal, o.shipping, o.total, o.taxTotal ?? includedTax(o.total),
       o.shipTo?.name || o.salonName, o.shipTo?.address || salonAddress(salonsById.get(o.salonId)), o.note || '', o.carrier || '', o.tracking || '', o.shippedAt || null, o.deliveredAt || null,
-      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
+      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.feeRate ?? salonsById.get(o.salonId)?.feeRate ?? 0, o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
     for (const [i, l] of (o.items || []).entries()) await tx.run('INSERT INTO supply_order_items (supply_order_id, line_no, product_id, sku, name, size, image, unit_price, quantity, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10)', [o.id, i + 1, l.id, l.sku || skuOf(l.id), l.name, l.size || '', l.image || '', l.unitPrice, l.quantity]);
   }
   for (const sub of state.supplySubscriptions || []) {

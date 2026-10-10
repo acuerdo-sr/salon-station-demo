@@ -1,12 +1,12 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=de28f620d4';
-import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=de28f620d4';
-import { validateProfile, profileComplete } from './member-store.js?v=de28f620d4';
-import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=de28f620d4';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=de28f620d4';
-import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=de28f620d4';
-import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=de28f620d4';
-import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=de28f620d4';
+import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress, referralSummary, monthBefore } from './supply-core.js?v=34c52406ea';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=34c52406ea';
+import { validateProfile, profileComplete } from './member-store.js?v=34c52406ea';
+import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=34c52406ea';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=34c52406ea';
+import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=34c52406ea';
+import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=34c52406ea';
+import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=34c52406ea';
 export const demoOperators = [
   // 管理会社は藤井企画（運営管理の画面 admin.html）。ディーラーは F.I.Tソリューション（BICMA）だけで、すべての仕入れ・出荷を受け持つ（ディーラーの画面 dealer.html）
   {id:'admin',role:'admin',name:'藤井企画 運営担当',email:'admin@example.test'},
@@ -101,6 +101,9 @@ export function migrate(state,catalog){
   for(const k of ['addresses','cards'])if(!state[k]||typeof state[k]!=='object'||Array.isArray(state[k])){state[k]={};changed=true;}
   if(!Array.isArray(state.categories)){state.categories=seedCategories(state.products||[]);changed=true;}
   for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';delete o.payment;changed=true;}
+  // 以前の注文の明細に卸価格（美容室の取り分の計算に使う）、加盟店の発注に紹介料率を補う
+  for(const o of state.orders||[])for(const i of o.items||[])if(i.wholesalePrice===undefined){i.wholesalePrice=(state.products||[]).find(p=>p.id===i.id)?.wholesalePrice??wholesaleOf(i.price);changed=true;}
+  for(const o of state.supplyOrders||[])if(o.feeRate===undefined){o.feeRate=(state.salons||[]).find(s=>s.id===o.salonId)?.feeRate??0;changed=true;}
   // ディーラーを BICMA だけにする（以前の SENA・BOTANICA の商品・発注・注文明細は BICMA が出荷する）
   if(Array.isArray(state.dealers)&&(state.dealers.length!==1||state.dealers[0].id!=='bicma')){
     state.dealers=seedDealers();
@@ -150,7 +153,7 @@ function quote(state,input){
     const p=state.products.find(p=>p.id===line.id&&p.enabled);if(!p)fail('販売していない商品が含まれています。',409);
     int(line.quantity,1,99);if(p.stock<line.quantity)fail(`${p.name}の在庫が不足しています（残り${p.stock}点）。`,409);
     if(p.price!==line.price)fail(`${p.name}の価格が変更されました。カートを更新してください。`,409);
-    return {id:p.id,name:p.name,image:p.image,size:p.size,price:p.price,cost:p.cost,quantity:line.quantity,dealerId:p.dealerId};
+    return {id:p.id,name:p.name,image:p.image,size:p.size,price:p.price,cost:p.cost,wholesalePrice:p.wholesalePrice,quantity:line.quantity,dealerId:p.dealerId};
   });
   const subtotal=items.reduce((s,p)=>s+p.price*p.quantity,0),shipping=shippingFor(subtotal);
   return {items,subtotal,shipping,total:subtotal+shipping};
@@ -210,7 +213,7 @@ function placeOrder(state,input,actor,now,effects=[]){
   // カード決済：登録済みカード・新しいカード（トークン）・トークンなし（テスト決済）のどれか。承認されなければ注文は作らない
   const card=pay.cardId?cardList(state,member.id).find(c=>c.id===pay.cardId)||fail('登録済みのカードが見つかりません。',404):pay.card;
   testCharge(card?.token||'tok_test_'+crypto.randomUUID().replace(/-/g,'').slice(0,20),q.total);if(pay.saveCard)saveCard(state,member.id,pay.card,now);
-  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,paymentMethod:'card',paymentStatus:'captured',status:'ordered',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:ORDER_PLACED_LABEL}]};
+  const order={id,requestKey:key,fingerprint,createdAt:now,memberId:member.id,salonId:salon.id,salonName:salon.name,seller:state.dealers[0]?.name||salon.owner,staffId:staff?.id||'',staffName:staff?.name||'指名なし',customer,...q,paymentMethod:'card',paymentStatus:'captured',status:'ordered',feeRate:salon.feeRate,fee:feeOf(q.subtotal,salon.feeRate),timeline:[{at:now,label:ORDER_PLACED_LABEL}]};
   state.orders.unshift(order);
   // お届け先：住所録が空なら今回のお届け先を登録する。「保存する」を選んだ場合も追加する（10件まで）
   if(!saved&&(!book.length||input?.saveAddress===true)&&book.length<MAX_ADDRESSES){if(!book.length||input?.saveAsDefault===true)book.forEach(a=>{a.isDefault=false;});book.push({id:'ad-'+crypto.randomUUID().slice(0,8),name:customer.name,postal:customer.postal,prefecture:customer.prefecture,city:customer.city,street:customer.street,building:customer.building,phone:customer.phone,isDefault:!book.length||input?.saveAsDefault===true,updatedAt:now});}
@@ -228,12 +231,15 @@ function refreshOrder(state,order){
 // internal：管理画面向け（お届けごとの仕入先を含める）。お客様向けには仕入先を出さない
 function customerOrder(state,order,internal=false){
   const {fingerprint,requestKey,fee,feeRate,...safe}=order;
-  return {...clone(safe),payment:paymentLabel(order.paymentMethod,order.paymentStatus),items:safe.items.map(({cost,...p})=>p),shipments:orderPos(state,order.id).map(p=>({id:p.id,...(internal?{dealerId:p.dealerId,dealerName:state.dealers.find(d=>d.id===p.dealerId)?.name}:{}),status:p.status,carrier:p.carrier,tracking:p.tracking,shippedAt:p.shippedAt,items:p.items.map(({id,name,quantity})=>({id,name,quantity}))}))};
+  return {...clone(safe),payment:paymentLabel(order.paymentMethod,order.paymentStatus),items:safe.items.map(({cost,wholesalePrice,...p})=>p),shipments:orderPos(state,order.id).map(p=>({id:p.id,...(internal?{dealerId:p.dealerId,dealerName:state.dealers.find(d=>d.id===p.dealerId)?.name}:{}),status:p.status,carrier:p.carrier,tracking:p.tracking,shippedAt:p.shippedAt,items:p.items.map(({id,name,quantity})=>({id,name,quantity}))}))};
 }
 export function requireOperator(actor,roles=['admin','salon','dealer']){if(!actor.operator)fail('管理ログインが必要です。',401);if(!roles.includes(actor.operator.role))fail('この操作の権限がありません。',403);return actor.operator;}
 export function allowedOrder(actor,order){const op=actor.operator;return op&&(op.role==='admin'||op.role==='salon'&&op.salonId===order.salonId);}
 function restore(state,order){if(order.stockRestored)return;order.items.forEach(p=>{state.products.find(item=>item.id===p.id).stock+=p.quantity;});order.stockRestored=true;}
-export function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.cost*p.quantity,0),voided=['cancelled','returned'].includes(order.status);return {orderId:order.id,salonId:order.salonId,salonName:order.salonName,at:order.createdAt,status:order.status,sales:voided?0:order.subtotal,purchase:voided?0:purchase,fee:voided?0:order.fee,proceeds:voided?0:order.subtotal-purchase-order.fee,refunded:order.paymentStatus==='refunded'?order.total:0,pending:order.status==='return_requested'};}
+// 注文ごとの精算：お客様の代金（商品代）は F.I.Tソリューション が受け取る。
+// proceeds：美容室の取り分（売価−卸価格。F.I.Tソリューション から支払う／仕入れの請求と相殺）、fee：藤井企画への紹介料、dealerNet：F.I.Tソリューション に残る額（参考）
+export const shareOf=items=>items.reduce((s,p)=>s+(p.price-(p.wholesalePrice??wholesaleOf(p.price)))*p.quantity,0);
+export function settlement(order){const purchase=order.items.reduce((s,p)=>s+p.cost*p.quantity,0),share=shareOf(order.items),voided=['cancelled','returned'].includes(order.status);return {orderId:order.id,salonId:order.salonId,salonName:order.salonName,at:order.createdAt,status:order.status,sales:voided?0:order.subtotal,purchase:voided?0:purchase,fee:voided?0:order.fee,proceeds:voided?0:share,dealerNet:voided?0:order.subtotal-purchase-share-order.fee,refunded:order.paymentStatus==='refunded'?order.total:0,pending:order.status==='return_requested'};}
 
 // effects には、実際に状態が変わったときだけ通知などの副作用の種類を積む（再送・同一状態への更新では積まない）。
 export function platformRequest(state,route,method='GET',input,actor={},now=new Date().toISOString(),effects=[]){
@@ -313,7 +319,9 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
       purchaseOrders:pos.map(p=>{const o=state.orders.find(o=>o.id===p.orderId);return {...clone(p),salonName:o.salonName,customer:customerFor(op.role,clone(o.customer),o.memberId)};}),categories:op.role==='admin'?categoryList(state):[],concernNames:CONCERN_NAMES,
       profiles:clone(members).map(p=>({...p,ref:memberRef(p.id)})),accessLogs:state.accessLogs.filter(row=>accessLogVisible(op,row)).slice(0,ACCESS_LOG_LIMIT).map(row=>accessLogView(op,clone(row))),
       staffStats:op.role==='dealer'?[]:staffStatsOf(state.profiles.filter(p=>op.role==='admin'||p.salonId===op.salonId)),
-      customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
+      customerStats:op.role==='dealer'?[]:summarizeCustomers(state.salons.filter(s=>op.role==='admin'||s.id===op.salonId),state.profiles.map(p=>({salonId:p.salonId,lineLinked:p.lineLinked,joinedMonth:jst(p.createdAt).slice(0,7)})),state.orders,jst(now).slice(0,7)),settlements:orders.map(settlement),
+      // 紹介料（F.I.Tソリューション → 藤井企画）と美容室の取り分：管理会社とディーラーに今月・前月の分を渡す
+      referrals:op.role==='salon'?null:Object.fromEntries([['current',jst(now).slice(0,7)],['previous',monthBefore(jst(now).slice(0,7))]].map(([k,month])=>[k,referralSummary({month,salons:state.salons,orders:state.orders,supplyOrders:state.supplyOrders||[]})])),events:op.role==='admin'?clone(state.events).sort((a,b)=>b.at.localeCompare(a.at)):[],...supplySnapshot(state,op)};
   }
   const poAction=route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
   if(poAction&&method==='PATCH'){
@@ -418,7 +426,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     if(op.role==='salon'&&op.salonId!==salon.id)fail('他店舗の情報は編集できません。',403);
     const update=salonInput({...salon,...input});
     if(op.role==='admin'){update.owner=required(input?.owner??salon.owner,100);update.feeRate=int(input?.feeRate??salon.feeRate,0,30);if(input?.enabled!==undefined&&typeof input.enabled!=='boolean')fail('受付設定を確認してください。');update.enabled=input?.enabled??salon.enabled;if(input?.staff!==undefined)update.staff=staffList(input.staff,salon.staff);}
-    else if(['owner','feeRate','enabled','staff'].some(k=>input?.[k]!==undefined))fail('サロン担当者は運用料率・受付設定・販売事業者名を変更できません。',403);
+    else if(['owner','feeRate','enabled','staff'].some(k=>input?.[k]!==undefined))fail('サロン担当者は紹介料率・受付設定・販売事業者名を変更できません。',403);
     Object.assign(salon,update);log(state,op,op.role==='admin'?'店舗設定を更新':'サロン情報を編集',salon.id,now);return clone(salon);
   }
   if(salonAction&&method==='DELETE'){

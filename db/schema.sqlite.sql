@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL REFERENCES orders(id),
   purchase_order_id TEXT NOT NULL REFERENCES purchase_orders(id), line_no INTEGER NOT NULL,
   product_id TEXT NOT NULL, sku TEXT NOT NULL, name TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '',
-  unit_price INTEGER NOT NULL, unit_cost INTEGER NOT NULL, quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 99),
+  unit_price INTEGER NOT NULL, unit_cost INTEGER NOT NULL, unit_wholesale INTEGER NOT NULL DEFAULT 0, quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 99),
   tax_rate INTEGER NOT NULL, dealer_id TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS order_items_order ON order_items(order_id, line_no);
 CREATE TABLE IF NOT EXISTS order_events (
@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS supply_orders (
   subtotal INTEGER NOT NULL, shipping INTEGER NOT NULL, total INTEGER NOT NULL, tax_total INTEGER NOT NULL,
   ship_name TEXT NOT NULL, ship_address TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
   carrier TEXT NOT NULL DEFAULT '', tracking TEXT NOT NULL DEFAULT '', shipped_at TEXT, delivered_at TEXT,
-  billing_month TEXT NOT NULL, invoice_id TEXT, stock_restored INTEGER NOT NULL DEFAULT 0,
+  billing_month TEXT NOT NULL, invoice_id TEXT, stock_restored INTEGER NOT NULL DEFAULT 0, fee_rate INTEGER NOT NULL DEFAULT 0,
   ordered_on TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS supply_orders_salon ON supply_orders(salon_id, created_at);
 CREATE INDEX IF NOT EXISTS supply_orders_billing ON supply_orders(billing_month, salon_id);

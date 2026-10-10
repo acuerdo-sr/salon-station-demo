@@ -91,7 +91,8 @@ test('a fresh database is seeded with the same sample workspace as the browser d
     const snap = await store.request('/admin/snapshot', 'GET', undefined, admin);
     assert.deepEqual(snap.products.map(p => [p.id, p.stock, p.cost, p.dealerId]), browser.products.map(p => [p.id, p.stock, p.cost, p.dealerId]));
     assert.deepEqual(snap.orders.map(o => o.status).sort(), browser.orders.map(o => o.status).sort());
-    assert.deepEqual(snap.settlements.map(s => s.proceeds).sort(), browser.orders.map(o => ({ ...o })).map(o => o.subtotal - o.items.reduce((s, p) => s + p.cost * p.quantity, 0) - o.fee).sort());
+    // 美容室の取り分は「売価 − 卸価格」、紹介料は注文時の率
+    assert.deepEqual(snap.settlements.map(s => [s.proceeds, s.fee]).sort(), browser.orders.map(o => [o.items.reduce((s, p) => s + (p.price - p.wholesalePrice) * p.quantity, 0), o.fee]).sort());
   } finally { await db.close(); }
 });
 
@@ -126,7 +127,7 @@ test('a database created by the previous version gains wholesale prices, operato
     assert.ok((await db.tableColumns('operators')).includes('line_id'));
     for (const table of ['supply_orders', 'supply_order_items', 'supply_subscriptions', 'supply_subscription_items', 'invoices']) assert.equal(await db.tableExists(table), true, table);
     assert.equal(Number((await db.get("SELECT wholesale_price FROM products WHERE id='shampoo-moist'")).wholesale_price), 1859);
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '7');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '8');
     assert.ok((await db.tableColumns('members')).includes('privacy_version'));
     // 一覧の短い説明が入り、初期の写真のままの商品だけ新しい写真になる
     const row = id => db.get('SELECT summary, image FROM products WHERE id=?', [id]), catalogOf = id => products.find(p => p.id === id);
