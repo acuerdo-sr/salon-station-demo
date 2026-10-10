@@ -1,12 +1,12 @@
 // 加盟店（サロン）の仕入れ画面。パソコン・スマートフォン・LINE ミニアプリで使う。
 // ログイン前はブランドを伝える画面（映像）。ログイン後は「前回と同じ内容で発注」「いつもの商品」「品番でまとめて発注」
 // 「最近買った商品」「発注履歴」「発送状況」を一番上に置き、少ない操作ですぐ発注できるようにする。新製品はその下。
-import { platform, isPages } from './platform-client.js?v=f1e62b6e1b';
-import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=f1e62b6e1b';
-import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=f1e62b6e1b';
-import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=f1e62b6e1b';
-import { lineConfig, liffIdToken } from './line-login.js?v=f1e62b6e1b';
-import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=f1e62b6e1b';
+import { platform, isPages } from './platform-client.js?v=c1de43b789';
+import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=c1de43b789';
+import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=c1de43b789';
+import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=c1de43b789';
+import { lineConfig, liffIdToken } from './line-login.js?v=c1de43b789';
+import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=c1de43b789';
 
 let operator = null, ws = null, staff = null, page = 'home', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
 let query = '', category = '', onlyFavorites = false, hideOut = false;

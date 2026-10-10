@@ -1,7 +1,7 @@
 // 加盟店（サロン）からフランチャイザーへの仕入発注・定期発注・発注提案・月次請求・店販の取り分。
 // 検証・計算はブラウザ版（このファイルの supplyRequest）と DB版（db/platform-store.mjs）で共有する。
-import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js?v=f1e62b6e1b';
-import { summarizeCustomers } from './privacy.js?v=f1e62b6e1b';
+import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js?v=c1de43b789';
+import { summarizeCustomers } from './privacy.js?v=c1de43b789';
 
 export const supplyStatuses = { ordered: '受付待ち', accepted: '出荷準備中', shipped: '出荷済み', delivered: 'お届け済み', cancelled: 'キャンセル' };
 export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', shipped: 'delivered' };
