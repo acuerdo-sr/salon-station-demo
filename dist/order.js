@@ -92,7 +92,7 @@ function homePage() {
     ${moving.length ? `<section class="fc-sec" id="shipping">${secHead('Shipping', '発送状況')}${moving.map(shipLine).join('')}</section>` : ''}
     <section class="fc-sec" id="usual">${secHead('Usual', 'いつもの商品', `<button class="text-link" data-page="products">すべての商品を見る ${icon('arrow')}</button>`)}
       ${fav.length ? '' : `<p class="subtle-note">${usual.length ? 'よく発注する商品です。' : ''}商品の ☆ を押すと「いつもの商品」に登録できます。</p>`}
-      ${usual.length ? usual.map(productRow).join('') : empty('まだ発注がありません', '「商品一覧」から商品を選んでください。', `<button class="btn primary" data-page="products">商品一覧へ</button>`)}</section>
+      ${usual.length ? `<div class="fc-usual">${usual.map(productRow).join('')}</div>` : empty('まだ発注がありません', '「商品一覧」から商品を選んでください。', `<button class="btn primary" data-page="products">商品一覧へ</button>`)}</section>
     ${ws.suggestions.length ? `<section class="fc-sec">${secHead('Suggest', '発注のご提案')}<p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${ws.suggestions.map(suggestLine).join('')}</section>` : ''}
     ${recent.length ? `<section class="fc-sec" id="recent">${secHead('Recent', '最近買った商品')}<div class="fc-cards">${recent.map(productCard).join('')}</div></section>` : ''}
     ${news.length ? `<section class="fc-sec">${secHead('New', '新製品')}<p class="subtle-note">新しく入った商品です。</p><div class="fc-cards">${news.map(productCard).join('')}</div></section>` : ''}

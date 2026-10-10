@@ -3,7 +3,7 @@ let membersPromise;
 
 // 公開版（GitHub Pages）の会員機能はブラウザ内の体験用。商品・注文は platform-client.js が扱う。
 async function demoApi(route, options) {
-  membersPromise ??= import('./member-store.js?v=2455e05063').then(module => module.createMemberStore(localStorage, sessionStorage, `salon-demo-members-v1:${new URL('.', import.meta.url).pathname}`));
+  membersPromise ??= import('./member-store.js?v=534580f1d6').then(module => module.createMemberStore(localStorage, sessionStorage, `salon-demo-members-v1:${new URL('.', import.meta.url).pathname}`));
   const members = await membersPromise;
   if (!route.startsWith('/auth/')) throw Error('この操作は利用できません。');
   const perform = () => members.request(route, options.method || 'GET', options.body ? JSON.parse(options.body) : undefined);

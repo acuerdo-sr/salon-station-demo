@@ -552,3 +552,11 @@ html{scrollbar-gutter:stable}
 .netting-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;padding:0 22px 22px}.netting-grid h3{font-size:13px;font-weight:600;margin-bottom:8px}.netting .grand span:first-child{font-size:13px}.netting .muted-row{color:var(--muted);font-size:12px}@media(max-width:900px){.netting-grid{grid-template-columns:1fr}}
 /* サロン管理：加盟店ごとの設定の一覧 */
 .salon-settings{margin-bottom:22px}
+/* 発注画面「いつもの商品」：横に長い行をやめ、商品名・価格・数量が近くにまとまるカードを並べる */
+.fc-usual{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.fc-usual .b2b-row{grid-template-columns:64px minmax(0,1fr) auto;grid-template-areas:"img copy copy" "price price actions";gap:12px 0;align-items:start;padding:16px;border:1px solid var(--fc-line);border-radius:16px;background:#fff}
+.fc-usual .b2b-row img{grid-area:img;width:64px;height:64px}
+.fc-usual .b2b-row-copy{grid-area:copy;padding-left:14px}
+.fc-usual .b2b-row-price{grid-area:price;text-align:left;align-self:center;border-top:1px solid var(--fc-line);padding-top:12px}
+.fc-usual .b2b-row-actions{grid-area:actions;justify-content:flex-end;align-self:stretch;border-top:1px solid var(--fc-line);padding-top:12px}
+@media(max-width:650px){.fc-usual{grid-template-columns:1fr;gap:12px}.fc-usual .b2b-row{padding:14px}}

@@ -1,16 +1,16 @@
 // 加盟店（サロン）の仕入れ画面。パソコン・スマートフォン・LINE ミニアプリで使う。
 // ログイン前はブランドを伝える画面（映像）。ログイン後は「前回と同じ内容で発注」「いつもの商品」「品番でまとめて発注」
 // 「最近買った商品」「発注履歴」「発送状況」を一番上に置き、少ない操作ですぐ発注できるようにする。新製品はその下。
-import { platform, isPages } from './platform-client.js?v=2455e05063';
-import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=2455e05063';
-import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=2455e05063';
-import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=2455e05063';
-import { lineConfig, liffIdToken } from './line-login.js?v=2455e05063';
-import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=2455e05063';
-import qrcode from './qr-code.js?v=2455e05063';
-import { statuses } from './platform-core.js?v=2455e05063';
-import { genderNames } from './member-store.js?v=2455e05063';
-import { splitName, formatPhone } from './person.js?v=2455e05063';
+import { platform, isPages } from './platform-client.js?v=534580f1d6';
+import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=534580f1d6';
+import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=534580f1d6';
+import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=534580f1d6';
+import { lineConfig, liffIdToken } from './line-login.js?v=534580f1d6';
+import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=534580f1d6';
+import qrcode from './qr-code.js?v=534580f1d6';
+import { statuses } from './platform-core.js?v=534580f1d6';
+import { genderNames } from './member-store.js?v=534580f1d6';
+import { splitName, formatPhone } from './person.js?v=534580f1d6';
 
 let operator = null, ws = null, staff = null, page = 'home', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
 let query = '', category = '', onlyFavorites = false, hideOut = false;
@@ -92,7 +92,7 @@ function homePage() {
     ${moving.length ? `<section class="fc-sec" id="shipping">${secHead('Shipping', '発送状況')}${moving.map(shipLine).join('')}</section>` : ''}
     <section class="fc-sec" id="usual">${secHead('Usual', 'いつもの商品', `<button class="text-link" data-page="products">すべての商品を見る ${icon('arrow')}</button>`)}
       ${fav.length ? '' : `<p class="subtle-note">${usual.length ? 'よく発注する商品です。' : ''}商品の ☆ を押すと「いつもの商品」に登録できます。</p>`}
-      ${usual.length ? usual.map(productRow).join('') : empty('まだ発注がありません', '「商品一覧」から商品を選んでください。', `<button class="btn primary" data-page="products">商品一覧へ</button>`)}</section>
+      ${usual.length ? `<div class="fc-usual">${usual.map(productRow).join('')}</div>` : empty('まだ発注がありません', '「商品一覧」から商品を選んでください。', `<button class="btn primary" data-page="products">商品一覧へ</button>`)}</section>
     ${ws.suggestions.length ? `<section class="fc-sec">${secHead('Suggest', '発注のご提案')}<p class="subtle-note">いつもの発注の間隔から、そろそろ必要になりそうな商品です。</p>${ws.suggestions.map(suggestLine).join('')}</section>` : ''}
     ${recent.length ? `<section class="fc-sec" id="recent">${secHead('Recent', '最近買った商品')}<div class="fc-cards">${recent.map(productCard).join('')}</div></section>` : ''}
     ${news.length ? `<section class="fc-sec">${secHead('New', '新製品')}<p class="subtle-note">新しく入った商品です。</p><div class="fc-cards">${news.map(productCard).join('')}</div></section>` : ''}
