@@ -132,7 +132,7 @@ test('a version-4 database is upgraded: the orders table is rebuilt to allow pen
     await db.exec("ALTER TABLE member_addresses DROP COLUMN phone; DROP TABLE member_cards; DROP TABLE password_resets; DROP TABLE mail_outbox; UPDATE app_meta SET meta_value='4' WHERE meta_key='schema_version'");
     const store = createPlatformStore(db, { catalog: products, concernNames: concernCategories });
     await store.init({ now });
-    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '10');
+    assert.equal((await db.get("SELECT meta_value FROM app_meta WHERE meta_key='schema_version'")).meta_value, '11');
     for (const column of ['payment_method', 'ship_phone']) assert.ok((await db.tableColumns('orders')).includes(column), column);
     assert.ok((await db.tableColumns('member_addresses')).includes('phone'));
     for (const table of ['member_cards', 'password_resets', 'mail_outbox']) assert.ok(await db.tableExists(table), table);

@@ -130,7 +130,7 @@ for (const [name, create] of engines(now)) {
     await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, shipper), /出荷前/);
     // 本部：加盟店からの発注（お届け先は店舗）
     const supply = await e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity: 2, price: 1859 }] }, salonOp);
-    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, admin), /権限/, '加盟店の発注の出荷もディーラーが行う');
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, admin), /出力できない/, '藤井企画が出せるのは、藤井企画が受け付けた発注だけ');
     const hq = await e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, shipper);
     const s = Object.fromEntries(hq.columns.map((c, i) => [c, hq.rows[0][i]]));
     assert.equal(s['お届け先名称1'], 'LUMIÈRE 表参道'); assert.equal(s['お届け先電話番号'], '03-0000-0000'); assert.equal(s['ご依頼主名称1'], 'F.I.Tソリューション（BICMA）'); assert.equal(s['品名1'], 'モイストリペア シャンプー ×2');

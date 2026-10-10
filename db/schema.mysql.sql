@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS supply_orders (
   ship_name VARCHAR(100) NOT NULL, ship_address VARCHAR(300) NOT NULL, note VARCHAR(200) NOT NULL DEFAULT '',
   carrier VARCHAR(40) NOT NULL DEFAULT '', tracking VARCHAR(60) NOT NULL DEFAULT '', shipped_at VARCHAR(30) NULL, delivered_at VARCHAR(30) NULL,
   billing_month CHAR(7) NOT NULL, invoice_id VARCHAR(40) NULL, stock_restored TINYINT(1) NOT NULL DEFAULT 0, fee_rate INT NOT NULL DEFAULT 0,
-  biller VARCHAR(10) NOT NULL DEFAULT 'fit', agency_total INT NOT NULL DEFAULT 0,
+  biller VARCHAR(10) NOT NULL DEFAULT 'fit', agency_total INT NOT NULL DEFAULT 0, shipper VARCHAR(10) NOT NULL DEFAULT 'fit',
   ordered_on CHAR(10) NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL,
   KEY supply_orders_salon (salon_id, created_at), KEY supply_orders_billing (billing_month, salon_id),
   CONSTRAINT supply_orders_source CHECK (source IN ('manual','reorder','suggestion','subscription')),

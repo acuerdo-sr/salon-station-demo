@@ -1,7 +1,7 @@
 // 加盟店（サロン）からフランチャイザーへの仕入発注・定期発注・発注提案・月次請求・店販の取り分。
 // 検証・計算はブラウザ版（このファイルの supplyRequest）と DB版（db/platform-store.mjs）で共有する。
-import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, shareOf, requestKeyOf, validateTracking } from './platform-core.js?v=52a35508c0';
-import { summarizeCustomers } from './privacy.js?v=52a35508c0';
+import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, shareOf, requestKeyOf, validateTracking } from './platform-core.js?v=2455e05063';
+import { summarizeCustomers } from './privacy.js?v=2455e05063';
 
 export const supplyStatuses = { ordered: '受付待ち', accepted: '出荷準備中', shipped: '出荷済み', delivered: 'お届け済み', cancelled: 'キャンセル' };
 export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', shipped: 'delivered' };
@@ -26,6 +26,15 @@ export const billerInput = value => { const v = String(value ?? 'fujii'); if (!B
 export const supplyBillerFor = (salon, monthOrders) => monthOrders.find(o => o.status !== 'cancelled' && o.biller)?.biller || salon.supplyBiller || 'fit';
 // 請求書を締める・入金を記録するのは請求元：F.I.Tソリューション はディーラー、藤井企画は管理会社のアカウント
 export const billerOfRole = role => role === 'admin' ? 'fujii' : 'fit';
+// 出荷元（shipper）：受け付けた会社が出荷まで受け持つ。''＝まだ受け付けていない、'fit'＝F.I.Tソリューション、'fujii'＝藤井企画。
+// 藤井企画が出荷できるのは、請求元が藤井企画の加盟店の発注だけ（藤井企画の在庫から出すので、F.I.T の在庫は戻し、代理店価格の請求もしない）
+export const shipperOf = order => order.shipper || (order.status === 'ordered' ? '' : 'fit');
+export function shipCheck(op, order) {
+  const by = billerOfRole(op.role), now = shipperOf(order);
+  if (op.role === 'admin' && order.biller !== 'fujii') fail('藤井企画が出荷できるのは、請求元が藤井企画の加盟店の発注です。', 403);
+  if (now && now !== by) fail(`この発注は${BILLERS[now]}が出荷を受け持っています。`, 409);
+  return by;
+}
 // 請求書を見られるのは：加盟店は自店の分、藤井企画はすべて、F.I.Tソリューション は自分が請求元の分（藤井企画が加盟店へ出す請求書は見せない）
 export const invoiceVisible = (op, inv) => op.role === 'admin' || (op.role === 'dealer' ? (inv.biller || 'fit') === 'fit' : inv.salonId === op.salonId);
 export function invoiceReader(actor, inv) {
@@ -173,7 +182,7 @@ function placeSupply(state, { key, lines, note = '', source = 'manual', subscrip
   const items = lines(), id = supplyOrderId(now), month = jst(now).slice(0, 7);
   const biller = supplyBillerFor(salon, state.supplyOrders.filter(o => o.salonId === salonId && o.billingMonth === month));
   const agencyTotal = biller === 'fujii' ? items.reduce((s, l) => s + agencyOf(state.products.find(p => p.id === l.id)) * l.quantity, 0) : 0;
-  const order = { id, requestKey: key, salonId, salonName: salon.name, operatorId: op.id, operatorName: op.name, source, subscriptionId, status: 'ordered', items: items.map(l => ({ ...l, amount: l.unitPrice * l.quantity })), ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note, carrier: '', tracking: '', shippedAt: '', deliveredAt: '', billingMonth: month, invoiceId: '', orderedOn: jst(now).slice(0, 10), createdAt: now, stockRestored: false, biller, feeRate: biller === 'fit' ? (salon.supplyFeeRate ?? salon.feeRate) : 0, agencyTotal };
+  const order = { id, requestKey: key, salonId, salonName: salon.name, operatorId: op.id, operatorName: op.name, source, subscriptionId, status: 'ordered', items: items.map(l => ({ ...l, amount: l.unitPrice * l.quantity })), ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note, carrier: '', tracking: '', shippedAt: '', deliveredAt: '', billingMonth: month, invoiceId: '', orderedOn: jst(now).slice(0, 10), createdAt: now, stockRestored: false, biller, feeRate: biller === 'fit' ? (salon.supplyFeeRate ?? salon.feeRate) : 0, agencyTotal, shipper: '' };
   for (const l of items) state.products.find(p => p.id === l.id).stock -= l.quantity;
   state.supplyOrders.unshift(order);
   log(state, op, source === 'subscription' ? '定期発注を作成' : '加盟店発注を受付', id, now);
@@ -262,13 +271,19 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
   if (invoice && method === 'GET') { const inv = state.invoices.find(i => i.id === invoice[1]) || fail('請求書が見つかりません。', 404); invoiceReader(actor, inv); return invoiceDetail(state, inv); }
   const ship = route.match(/^\/admin\/supply-orders\/([^/]+)$/);
   if (ship && method === 'PATCH') {
-    const op = requireOperator(actor, ['dealer']), order = state.supplyOrders.find(o => o.id === ship[1]) || fail('発注が見つかりません。', 404);
+    const op = requireOperator(actor, ['dealer', 'admin']), order = state.supplyOrders.find(o => o.id === ship[1]) || fail('発注が見つかりません。', 404);
     if (order.status === 'cancelled') fail('キャンセル済みの発注です。', 409);
+    const by = shipCheck(op, order);
     if (input?.status === order.status) return supplyView(order);
     if (SUPPLY_TRANSITIONS[order.status] !== input?.status) fail('受付 → 出荷 → 配達完了の順に操作してください。', 409);
+    if (input.status === 'accepted') {
+      order.shipper = by;
+      // 藤井企画の在庫から出荷する：F.I.T の在庫の引き当てを戻し、F.I.T から藤井企画への代理店価格の請求はしない
+      if (by === 'fujii') { if (!order.stockRestored) { for (const l of order.items) { const p = state.products.find(p => p.id === l.id); if (p) p.stock += l.quantity; } order.stockRestored = true; } order.agencyTotal = 0; }
+    }
     if (input.status === 'shipped') { const { tracking, carrier } = validateTracking(input); Object.assign(order, { tracking, carrier, shippedAt: now }); effects.push({ type: 'supply_shipped', supplyOrderId: order.id, salonId: order.salonId }); }
     if (input.status === 'delivered') order.deliveredAt = now;
-    order.status = input.status; log(state, op, `加盟店発注：${supplyStatuses[order.status]}`, order.id, now);
+    order.status = input.status; log(state, op, `加盟店発注：${supplyStatuses[order.status]}${input.status === 'accepted' ? `（出荷：${BILLERS[by]}）` : ''}`, order.id, now);
     return supplyView(order);
   }
   if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin', 'dealer']); return runSubscriptions(state, now, effects); }
@@ -298,11 +313,11 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
 // ブラウザ版の初期データ：LUMIÈRE の過去の仕入発注（発注提案が出るように2週間ごと）と定期発注1件
 // デモの仕入れ：LUMIÈRE は請求元 F.I.Tソリューション、atelier 凪 は請求元 藤井企画（これまでのお取引）の例。[何日前, 加盟店, 明細, 状態]
 const LUMIERE_SAMPLES = [[42, 'lumiere', [['shampoo-moist', 6], ['treatment-repair', 3]], 'delivered'], [35, 'lumiere', [['oil-smooth', 4]], 'delivered'], [28, 'lumiere', [['shampoo-moist', 6]], 'delivered'], [14, 'lumiere', [['shampoo-moist', 6], ['treatment-repair', 3]], 'shipped']];
-const FUJII_SAMPLES = [[38, 'atelier', [['treatment-repair', 4], ['oil-smooth', 2]], 'delivered'], [21, 'atelier', [['shampoo-moist', 6]], 'delivered'], [2, 'atelier', [['shampoo-moist', 3], ['oil-smooth', 2]], 'accepted']];
+const FUJII_SAMPLES = [[38, 'atelier', [['treatment-repair', 4], ['oil-smooth', 2]], 'delivered'], [21, 'atelier', [['shampoo-moist', 6]], 'delivered'], [2, 'atelier', [['shampoo-moist', 3], ['oil-smooth', 2]], 'ordered']];
 function sampleSupply(state, now, [ago, salonId, lines, status]) {
   const salon = state.salons.find(s => s.id === salonId), op = salonId === 'lumiere' ? { id: 'salon-a', name: 'LUMIÈRE 店舗担当' } : { id: 'salon-' + salonId, name: salon.name + ' 店舗担当' };
   const at = new Date(Date.parse(now) - ago * DAY).toISOString(), items = lines.map(([id, quantity]) => { const p = state.products.find(p => p.id === id); return { id, sku: p.sku, name: p.name, size: p.size, image: p.image, unitPrice: p.wholesalePrice, quantity, amount: p.wholesalePrice * quantity }; });
-  return { id: 'WO-' + at.slice(2, 10).replaceAll('-', '') + '-S' + String(ago).padStart(4, '0'), requestKey: `sample-${salonId}-${ago}`, salonId: salon.id, salonName: salon.name, operatorId: op.id, operatorName: op.name, source: 'manual', subscriptionId: null, status, items, ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note: '', tracking: status === 'accepted' ? '' : 'DEMO-W' + ago, carrier: status === 'accepted' ? '' : 'デモ配送', shippedAt: status === 'accepted' ? '' : at, deliveredAt: status === 'delivered' ? at : '', billingMonth: jst(at).slice(0, 7), invoiceId: '', orderedOn: jst(at).slice(0, 10), createdAt: at, stockRestored: false,
+  return { id: 'WO-' + at.slice(2, 10).replaceAll('-', '') + '-S' + String(ago).padStart(4, '0'), requestKey: `sample-${salonId}-${ago}`, salonId: salon.id, salonName: salon.name, operatorId: op.id, operatorName: op.name, source: 'manual', subscriptionId: null, status, items, ...supplyTotals(items), shipTo: { name: salon.name, address: salonAddress(salon) }, note: '', tracking: ['ordered', 'accepted'].includes(status) ? '' : 'DEMO-W' + ago, carrier: ['ordered', 'accepted'].includes(status) ? '' : 'デモ配送', shippedAt: ['ordered', 'accepted'].includes(status) ? '' : at, shipper: status === 'ordered' ? '' : 'fit', deliveredAt: status === 'delivered' ? at : '', billingMonth: jst(at).slice(0, 7), invoiceId: '', orderedOn: jst(at).slice(0, 10), createdAt: at, stockRestored: false,
       biller: salon.supplyBiller || 'fit', feeRate: (salon.supplyBiller || 'fit') === 'fit' ? salon.supplyFeeRate ?? 15 : 0, agencyTotal: salon.supplyBiller === 'fujii' ? lines.reduce((n, [id, quantity]) => n + agencyOf(state.products.find(p => p.id === id)) * quantity, 0) : 0 };
 }
 // 以前のデモデータ（LUMIÈRE の仕入れだけ）にも、藤井企画が請求元の仕入れの例を足す（atelier 凪 の仕入れがまだないときだけ）

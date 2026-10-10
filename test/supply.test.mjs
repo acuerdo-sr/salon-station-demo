@@ -202,6 +202,34 @@ for (const [name, create] of engines(now)) {
     assert.ok((await e.call('/supply', 'GET', undefined, otherSalon)).products.every(p => p.cost === undefined && p.agencyPrice === undefined));
   });
 
+  run('藤井企画 can take an order of a 藤井企画-billed salon and ship it from its own stock; F.I.T then cannot, and no agency price is billed', async e => {
+    const stock = async () => (await e.call('/admin/snapshot', 'GET', undefined, dealer)).products.find(p => p.id === 'shampoo-moist').stock;
+    const place = (actor, quantity) => e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity, price: 1859 }] }, actor);
+    const before = await stock(), viaFujii = await place(otherSalon, 2), viaFit = await place(salonOp, 1), byFit = await place(otherSalon, 1);
+    assert.equal(await stock(), before - 4);
+    const view = async id => (await e.call('/admin/snapshot', 'GET', undefined, admin)).supplyOrders.find(o => o.id === id);
+    assert.deepEqual([(await view(viaFujii.id)).shipper, (await view(viaFujii.id)).agencyTotal > 0], ['', true], '受け付けるまでは出荷元は未定');
+    // 藤井企画が出荷できるのは、請求元が藤井企画の加盟店の発注だけ
+    await assert.rejects(e.call('/admin/supply-orders/' + viaFit.id, 'PATCH', { status: 'accepted' }, admin), /請求元が藤井企画/);
+    await assert.rejects(e.call('/admin/supply-orders/' + viaFujii.id, 'PATCH', { status: 'accepted' }, salonOp), /権限/);
+    const taken = await e.call('/admin/supply-orders/' + viaFujii.id, 'PATCH', { status: 'accepted' }, admin);
+    assert.deepEqual([taken.status, taken.shipper, taken.agencyTotal], ['accepted', 'fujii', 0], '藤井企画の在庫から出すので、代理店価格の請求はしない');
+    assert.equal(await stock(), before - 2, 'F.I.T の在庫の引き当ては戻す');
+    await assert.rejects(e.call('/admin/supply-orders/' + viaFujii.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'DEMO-1' }, dealer), /藤井企画が出荷/);
+    // 出荷指示CSV：ご依頼主は出荷する会社。ほかの会社が受け持つ発注は出せない
+    const csv = await e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [viaFujii.id] }, admin);
+    assert.ok(csv.rows[0].includes('藤井企画'));
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [viaFujii.id] }, dealer), /出力できない/);
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [byFit.id] }, admin), /出力できない/);
+    assert.equal((await e.call('/admin/supply-orders/' + viaFujii.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'DEMO-1' }, admin)).status, 'shipped');
+    assert.equal((await e.call('/admin/supply-orders/' + viaFujii.id, 'PATCH', { status: 'delivered' }, admin)).status, 'delivered');
+    // F.I.T が受け付けた発注は F.I.T が出荷し、代理店価格で藤井企画へ請求する
+    const fitTaken = await e.call('/admin/supply-orders/' + byFit.id, 'PATCH', { status: 'accepted' }, dealer);
+    assert.deepEqual([fitTaken.shipper, fitTaken.agencyTotal > 0], ['fit', true]);
+    await assert.rejects(e.call('/admin/supply-orders/' + byFit.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'DEMO-2' }, admin), /F.I.Tソリューションが出荷/);
+    assert.equal((await e.call('/supply', 'GET', undefined, otherSalon)).orders.find(o => o.id === viaFujii.id).tracking, 'DEMO-1', '加盟店に出荷が届く');
+  });
+
   run('admin sets the wholesale price; dealers cannot', async e => {
     assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, wholesalePrice: 2000, enabled: true }, admin)).wholesalePrice, 2000);
     await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, wholesalePrice: 3000, enabled: true }, admin), /卸価格は売価以下/);

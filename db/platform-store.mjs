@@ -13,7 +13,7 @@ import { validateProfile, profileComplete } from '../dist/member-store.js';
 import { encodeAddress, decodeAddress } from '../dist/person.js';
 import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, priceInput, ownPrices, dealerPriceCheck, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES, legacyImages } from '../dist/catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from '../dist/shipping-csv.js';
-import { ISSUER, salonAddress, referralSummary, monthBefore } from '../dist/supply-core.js';
+import { ISSUER, salonAddress, referralSummary, monthBefore, issuerFor, shipperOf } from '../dist/supply-core.js';
 import { schemaTable } from './adapter.mjs';
 import { passwordDigest } from '../dist/member-store.js';
 import { importState } from './import-state.mjs';
@@ -31,7 +31,7 @@ const READ_ONLY = new Set(['/quote', '/admin/sales']);
 const QUIET = new Set(['/cart', '/favorites', '/supply/favorites', '/admin/exports', '/admin/shipping-csv']);
 const quiet = route => QUIET.has(route) || /^\/(addresses|payment-methods)(\/|$)/.test(route);
 const SNAPSHOT_LIMIT = 1000;
-export const SCHEMA_VERSION = '10';
+export const SCHEMA_VERSION = '11';
 const KEY_CHECK = 'salon-station:key-check';
 // アクセス記録は追記のみ（SQLite）。MySQL ではアプリ用ユーザーに UPDATE / DELETE の権限を与えない（db/grants.mysql.sql）。
 const APPEND_ONLY_SQLITE = `CREATE TRIGGER IF NOT EXISTS data_access_logs_no_update BEFORE UPDATE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は変更できません'); END;
@@ -607,14 +607,16 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
         return { filename, columns: SHIPPING_COLUMNS, rows: rows.map(p => { const o = openRow(c, 'orders', p), salon = salons.find(s => s.id === p.salon_id);
           return shippingRow({ reference: p.id, to: { name: o.ship_name, postal: o.ship_postal, ...decodeAddress(o.ship_address), phone: o.ship_phone }, from: { name: salon.name, postal: '', address: salonAddress(salon), phone: salon.phone }, items: items.filter(i => i.purchase_order_id === p.id).map(i => ({ name: i.name, quantity: num(i.quantity) })), note: `注文 ${p.order_id}` }); }) };
       }
-      requireOperator(actor, ['dealer']);
+      // 加盟店発注：F.I.T は藤井企画が受け持つ発注を除いて、藤井企画は自社で受け付けた発注だけ（ご依頼主は出荷する会社）
+      const op = requireOperator(actor, ['dealer', 'admin']), from = op.role === 'admin' ? issuerFor('fujii') : ISSUER;
       const found = await supply.loadOrders(q, `id IN (${marks(ids)})`, ids);
       if (found.length !== ids.length) fail('発注が見つかりません。', 404);
       const rows = ids.map(id => found.find(o => o.id === id));
+      if (rows.some(o => op.role === 'admin' ? shipperOf(o) !== 'fujii' : shipperOf(o) === 'fujii')) fail('出力できない発注が含まれています。', 403);
       if (rows.some(o => !SUPPLY_SHIPPABLE.includes(o.status))) fail('出荷前の発注だけを選んでください。', 409);
       const salons = await loadSalons(q, { ids: [...new Set(rows.map(o => o.salonId))] });
       return { filename, columns: SHIPPING_COLUMNS, rows: rows.map(o => { const salon = salons.find(s => s.id === o.salonId);
-        return shippingRow({ reference: o.id, to: { name: o.shipTo?.name || salon.name, postal: '', address: o.shipTo?.address || salonAddress(salon), phone: salon.phone }, from: { name: ISSUER.name, postal: '', address: ISSUER.address, phone: ISSUER.phone }, items: o.items, note: '加盟店発注' }); }) };
+        return shippingRow({ reference: o.id, to: { name: o.shipTo?.name || salon.name, postal: '', address: o.shipTo?.address || salonAddress(salon), phone: salon.phone }, from: { name: from.name, postal: '', address: from.address, phone: from.phone }, items: o.items, note: '加盟店発注' }); }) };
     }
     if (route === '/admin/salons' && method === 'POST') {
       const op = requireOperator(actor, ['admin']);
@@ -822,6 +824,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (await db.tableExists('orders') && (await db.tableColumns('orders')).includes('ship_name') && !(await db.tableColumns('orders')).includes('payment_method')) await upgradeOrdersV5();
       const addColumn = async (table, column, sqliteType, mysqlType) => { if (await db.tableExists(table) && !(await db.tableColumns(table)).includes(column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${db.dialect === 'mysql' ? mysqlType : sqliteType}`); };
       await addColumn('member_addresses', 'phone', "TEXT NOT NULL DEFAULT ''", "VARCHAR(256) NOT NULL DEFAULT '' AFTER address");
+      // 版11：加盟店発注の出荷元（受け付けた会社。以前の発注は F.I.T、受付前のものは未定）
+      const addedShipper11 = await db.tableExists('supply_orders') && !(await db.tableColumns('supply_orders')).includes('shipper');
+      await addColumn('supply_orders', 'shipper', "TEXT NOT NULL DEFAULT 'fit'", "VARCHAR(10) NOT NULL DEFAULT 'fit' AFTER agency_total");
+      if (addedShipper11) await db.run("UPDATE supply_orders SET shipper='' WHERE status='ordered'");
       // 版10：代理店価格（F.I.T から藤井企画への卸値。F.I.T が設定する）。以前の商品は売価の55%
       const addedAgency10 = await db.tableExists('products') && !(await db.tableColumns('products')).includes('agency_price');
       await addColumn('products', 'agency_price', 'INTEGER NOT NULL DEFAULT 0', 'INT NOT NULL DEFAULT 0 AFTER wholesale_price');

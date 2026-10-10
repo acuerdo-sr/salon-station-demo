@@ -1,5 +1,5 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, addFujiiSamples, wholesaleOf, ISSUER, salonAddress, referralSummary, monthBefore, billerInput, agencyPriceOf } from './supply-core.js';
+import { supplyRequest, supplySnapshot, seedSupply, addFujiiSamples, wholesaleOf, issuerFor, shipperOf, ISSUER, salonAddress, referralSummary, monthBefore, billerInput, agencyPriceOf } from './supply-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js';
 import { validateProfile, profileComplete } from './member-store.js';
 import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js';
@@ -415,9 +415,10 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
       for(const salonId of [...new Set(rows.map(r=>r.po.salonId))].sort())recordAccess(state,{actorId:op.id||'',actorName:op.name,role:accessRoles.dealer,salonId,action:accessActions.export,target:accessTargets.shippingCsv,count:new Set(rows.filter(r=>r.po.salonId===salonId).map(r=>r.order.memberId)).size,ip:actor.ip},now);
       return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(({po,order,salon})=>shippingRow({reference:po.id,to:order.customer,from:{name:salon.name,postal:'',address:salonAddress(salon),phone:salon.phone},items:po.items,note:`注文 ${order.id}`}))};
     }
-    requireOperator(actor,['dealer']);
-    const rows=ids.map(id=>{const o=state.supplyOrders.find(x=>x.id===id);if(!o)fail('発注が見つかりません。',404);if(!SUPPLY_SHIPPABLE.includes(o.status))fail('出荷前の発注だけを選んでください。',409);return o;});
-    return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(o=>{const salon=salonFor(state,o.salonId);return shippingRow({reference:o.id,to:{name:o.shipTo?.name||salon.name,postal:'',address:o.shipTo?.address||salonAddress(salon),phone:salon.phone},from:{name:ISSUER.name,postal:'',address:ISSUER.address,phone:ISSUER.phone},items:o.items,note:'加盟店発注'});})};
+    // 加盟店発注：F.I.T は藤井企画が受け持つ発注を除いて、藤井企画は自社で受け付けた発注だけ（ご依頼主は出荷する会社）
+    const op=requireOperator(actor,['dealer','admin']),from=op.role==='admin'?issuerFor('fujii'):ISSUER;
+    const rows=ids.map(id=>{const o=state.supplyOrders.find(x=>x.id===id);if(!o)fail('発注が見つかりません。',404);if(op.role==='admin'?shipperOf(o)!=='fujii':shipperOf(o)==='fujii')fail('出力できない発注が含まれています。',403);if(!SUPPLY_SHIPPABLE.includes(o.status))fail('出荷前の発注だけを選んでください。',409);return o;});
+    return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(o=>{const salon=salonFor(state,o.salonId);return shippingRow({reference:o.id,to:{name:o.shipTo?.name||salon.name,postal:'',address:o.shipTo?.address||salonAddress(salon),phone:salon.phone},from:{name:from.name,postal:'',address:from.address,phone:from.phone},items:o.items,note:'加盟店発注'});})};
   }
   // 店舗登録（仕様書 2.1.1 / AD-002）：店舗IDは自動採番。QRコードは店舗IDから都度生成する。
   if(route==='/admin/salons'&&method==='POST'){

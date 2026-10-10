@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS supply_orders (
   ship_name TEXT NOT NULL, ship_address TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
   carrier TEXT NOT NULL DEFAULT '', tracking TEXT NOT NULL DEFAULT '', shipped_at TEXT, delivered_at TEXT,
   billing_month TEXT NOT NULL, invoice_id TEXT, stock_restored INTEGER NOT NULL DEFAULT 0, fee_rate INTEGER NOT NULL DEFAULT 0,
-  biller TEXT NOT NULL DEFAULT 'fit', agency_total INTEGER NOT NULL DEFAULT 0,
+  biller TEXT NOT NULL DEFAULT 'fit', agency_total INTEGER NOT NULL DEFAULT 0, shipper TEXT NOT NULL DEFAULT 'fit',
   ordered_on TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS supply_orders_salon ON supply_orders(salon_id, created_at);
 CREATE INDEX IF NOT EXISTS supply_orders_billing ON supply_orders(billing_month, salon_id);

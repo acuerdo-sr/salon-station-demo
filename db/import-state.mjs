@@ -2,7 +2,7 @@
 // どちらも「ブラウザ版と同じ形の state」をテーブルへ展開する。
 import { randomBytes } from 'node:crypto';
 import { jst, includedTax } from '../dist/platform-core.js';
-import { wholesaleOf, salonAddress, agencyPriceOf } from '../dist/supply-core.js';
+import { wholesaleOf, salonAddress, agencyPriceOf, shipperOf } from '../dist/supply-core.js';
 import { createFieldCrypto } from './crypto.mjs';
 import { seedCategories } from '../dist/catalog-core.js';
 import { encodeAddress } from '../dist/person.js';
@@ -109,11 +109,11 @@ export async function importState(tx, state, { catalog, concernNames = [], legac
   for (const o of [...(state.supplyOrders || [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     if (!salonIds.has(o.salonId)) continue;
     await tx.run(`INSERT INTO supply_orders (id, request_key, salon_id, operator_id, operator_name, source, subscription_id, status, subtotal, shipping, total, tax_total,
-      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, biller, agency_total, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, biller, agency_total, shipper, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [o.id, o.requestKey || `legacy-${o.id}`, o.salonId, o.operatorId || '', o.operatorName || '', o.source || 'manual', o.subscriptionId || null, o.status, o.subtotal, o.shipping, o.total, o.taxTotal ?? includedTax(o.total),
       o.shipTo?.name || o.salonName, o.shipTo?.address || salonAddress(salonsById.get(o.salonId)), o.note || '', o.carrier || '', o.tracking || '', o.shippedAt || null, o.deliveredAt || null,
-      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.feeRate ?? salonsById.get(o.salonId)?.feeRate ?? 0, o.biller || 'fit', o.agencyTotal || 0, o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
+      o.billingMonth || jst(o.createdAt).slice(0, 7), o.invoiceId || null, o.stockRestored ? 1 : 0, o.feeRate ?? salonsById.get(o.salonId)?.feeRate ?? 0, o.biller || 'fit', o.agencyTotal || 0, shipperOf(o), o.orderedOn || jst(o.createdAt).slice(0, 10), o.createdAt, now]);
     for (const [i, l] of (o.items || []).entries()) await tx.run('INSERT INTO supply_order_items (supply_order_id, line_no, product_id, sku, name, size, image, unit_price, quantity, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10)', [o.id, i + 1, l.id, l.sku || skuOf(l.id), l.name, l.size || '', l.image || '', l.unitPrice, l.quantity]);
   }
   for (const sub of state.supplySubscriptions || []) {

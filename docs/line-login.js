@@ -1,5 +1,5 @@
 // LINEログイン・LIFF のクライアント側。ローカル版はサーバーの設定を問い合わせ、公開版（GitHub Pages）は体験用の疑似ログインになる。
-import { api, isPages } from './api-client.js?v=52a35508c0';
+import { api, isPages } from './api-client.js?v=2455e05063';
 let configPromise;
 export function lineConfig() {
   configPromise ??= isPages ? Promise.resolve({ enabled: true, demo: true, liffId: '', orderLiffId: '', notifications: false }) : api('/auth/line/config').then(c => ({ demo: false, ...c })).catch(() => ({ enabled: false, demo: false, liffId: '' }));

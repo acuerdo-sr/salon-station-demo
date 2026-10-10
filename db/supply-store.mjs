@@ -1,7 +1,7 @@
 // DB版：加盟店からの仕入発注・定期発注・発注提案・月次請求。応答の形はブラウザ版（dist/supply-core.js）と同じ。
 import { fail, optional, requireOperator, jst, includedTax, requestKeyOf, validateTracking } from '../dist/platform-core.js';
 import {
-  supplyStatuses, SUPPLY_TRANSITIONS, supplyIntervals, ISSUER, issuerFor, BILLERS, agencyOf, supplyBillerFor, billerOfRole, invoiceReader, supplyOrderId, subscriptionId, invoiceId, invoiceDueOn, salonAddress,
+  supplyStatuses, SUPPLY_TRANSITIONS, supplyIntervals, ISSUER, issuerFor, BILLERS, agencyOf, supplyBillerFor, billerOfRole, invoiceReader, shipperOf, shipCheck, supplyOrderId, subscriptionId, invoiceId, invoiceDueOn, salonAddress,
   nextRunOn, addDays, supplyLines, supplyTotals, supplySource, subscriptionInput, closableMonth, supplySuggestions, ecSummary, monthBefore, supplyFavoritesInput,
 } from '../dist/supply-core.js';
 
@@ -14,7 +14,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     id: r.id, salonId: r.salon_id, salonName: r.ship_name, operatorId: r.operator_id, operatorName: r.operator_name, source: r.source, subscriptionId: r.subscription_id || null, status: r.status,
     items: items.map(i => ({ id: i.product_id, sku: i.sku, name: i.name, size: i.size, image: i.image, unitPrice: num(i.unit_price), quantity: num(i.quantity), amount: num(i.unit_price) * num(i.quantity) })),
     subtotal: num(r.subtotal), shipping: num(r.shipping), total: num(r.total), taxTotal: num(r.tax_total), shipTo: { name: r.ship_name, address: r.ship_address }, note: r.note,
-    carrier: r.carrier, tracking: r.tracking, shippedAt: r.shipped_at || '', deliveredAt: r.delivered_at || '', billingMonth: r.billing_month, invoiceId: r.invoice_id || '', orderedOn: r.ordered_on, createdAt: r.created_at, feeRate: num(r.fee_rate), biller: r.biller || 'fit', agencyTotal: num(r.agency_total), stockRestored: Boolean(num(r.stock_restored)),
+    carrier: r.carrier, tracking: r.tracking, shippedAt: r.shipped_at || '', deliveredAt: r.delivered_at || '', billingMonth: r.billing_month, invoiceId: r.invoice_id || '', orderedOn: r.ordered_on, createdAt: r.created_at, feeRate: num(r.fee_rate), biller: r.biller || 'fit', agencyTotal: num(r.agency_total), stockRestored: Boolean(num(r.stock_restored)), shipper: r.shipper ?? 'fit',
   });
   async function loadSupplyOrders(q, where, params, limit) {
     const rows = await q.all(`SELECT * FROM supply_orders${where ? ' WHERE ' + where : ''} ORDER BY created_at DESC, id DESC${limit ? ` LIMIT ${Number(limit)}` : ''}`, params);
@@ -50,8 +50,8 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     }
     const t = supplyTotals(items);
     await q.run(`INSERT INTO supply_orders (id, request_key, salon_id, operator_id, operator_name, source, subscription_id, status, subtotal, shipping, total, tax_total,
-      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, biller, agency_total, ordered_on, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'ordered', ?, ?, ?, ?, ?, ?, ?, '', '', NULL, NULL, ?, NULL, 0, ?, ?, ?, ?, ?, ?)`,
+      ship_name, ship_address, note, carrier, tracking, shipped_at, delivered_at, billing_month, invoice_id, stock_restored, fee_rate, biller, agency_total, shipper, ordered_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ordered', ?, ?, ?, ?, ?, ?, ?, '', '', NULL, NULL, ?, NULL, 0, ?, ?, ?, '', ?, ?, ?)`,
     [id, key, salonId, op.id, op.name, source, subId, t.subtotal, t.shipping, t.total, t.taxTotal, salon.name, salonAddress(salon), note, month, biller === 'fit' ? num(salon.supply_fee_rate) : 0, biller, agencyTotal, jst(now).slice(0, 10), now, now]);
     for (const [i, l] of items.entries()) await q.run('INSERT INTO supply_order_items (supply_order_id, line_no, product_id, sku, name, size, image, unit_price, quantity, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10)', [id, i + 1, l.id, l.sku, l.name, l.size, l.image, l.unitPrice, l.quantity]);
     await audit(q, op, source === 'subscription' ? '定期発注を作成' : '加盟店発注を受付', id, now);
@@ -172,16 +172,28 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
       }
       const ship = route.match(/^\/admin\/supply-orders\/([^/]+)$/);
       if (ship && method === 'PATCH') {
-        const op = requireOperator(actor, ['dealer']), order = await supplyById(q, ship[1]) || fail('発注が見つかりません。', 404);
+        const op = requireOperator(actor, ['dealer', 'admin']), order = await supplyById(q, ship[1]) || fail('発注が見つかりません。', 404);
         if (order.status === 'cancelled') fail('キャンセル済みの発注です。', 409);
+        const by = shipCheck(op, order);
         if (input?.status === order.status) return order;
         if (SUPPLY_TRANSITIONS[order.status] !== input?.status) fail('受付 → 出荷 → 配達完了の順に操作してください。', 409);
-        if (input.status === 'shipped') {
+        if (input.status === 'accepted') {
+          // 受け付けた会社が出荷まで受け持つ。藤井企画の在庫から出す場合は、F.I.T の在庫の引き当てを戻し、代理店価格の請求をしない
+          const r = await q.run("UPDATE supply_orders SET status='accepted', shipper=?, updated_at=? WHERE id=? AND status='ordered'", [by, now, order.id]);
+          if (r.changes !== 1) fail('ほかの担当者が先に受け付けました。画面を読み込み直してください。', 409);
+          if (by === 'fujii') {
+            await q.run('UPDATE supply_orders SET agency_total=0, stock_restored=1 WHERE id=?', [order.id]);
+            if (!order.stockRestored) for (const l of order.items) {
+              await q.run('UPDATE products SET stock=stock+?, updated_at=? WHERE id=?', [l.quantity, now, l.id]);
+              await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'adjust', ?, ?, ?)", [l.id, l.quantity, order.id, op.name, now]);
+            }
+          }
+        } else if (input.status === 'shipped') {
           const { tracking, carrier } = validateTracking(input);
           await q.run("UPDATE supply_orders SET status='shipped', tracking=?, carrier=?, shipped_at=?, updated_at=? WHERE id=?", [tracking, carrier, now, now, order.id]);
           effects.push({ type: 'supply_shipped', supplyOrderId: order.id, salonId: order.salonId });
         } else await q.run(`UPDATE supply_orders SET status=?, ${input.status === 'delivered' ? 'delivered_at=?, ' : ''}updated_at=? WHERE id=?`, input.status === 'delivered' ? [input.status, now, now, order.id] : [input.status, now, order.id]);
-        await audit(q, op, `加盟店発注：${supplyStatuses[input.status]}`, order.id, now);
+        await audit(q, op, `加盟店発注：${supplyStatuses[input.status]}${input.status === 'accepted' ? `（出荷：${BILLERS[by]}）` : ''}`, order.id, now);
         return supplyById(q, order.id);
       }
       if (route === '/admin/invoices/close' && method === 'POST') {
