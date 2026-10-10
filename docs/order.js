@@ -1,16 +1,16 @@
 // 加盟店（サロン）の仕入れ画面。パソコン・スマートフォン・LINE ミニアプリで使う。
 // ログイン前はブランドを伝える画面（映像）。ログイン後は「前回と同じ内容で発注」「いつもの商品」「品番でまとめて発注」
 // 「最近買った商品」「発注履歴」「発送状況」を一番上に置き、少ない操作ですぐ発注できるようにする。新製品はその下。
-import { platform, isPages } from './platform-client.js?v=e2ee89ba4b';
-import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=e2ee89ba4b';
-import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=e2ee89ba4b';
-import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=e2ee89ba4b';
-import { lineConfig, liffIdToken } from './line-login.js?v=e2ee89ba4b';
-import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=e2ee89ba4b';
-import qrcode from './qr-code.js?v=e2ee89ba4b';
-import { statuses } from './platform-core.js?v=e2ee89ba4b';
-import { genderNames } from './member-store.js?v=e2ee89ba4b';
-import { splitName, formatPhone } from './person.js?v=e2ee89ba4b';
+import { platform, isPages } from './platform-client.js?v=037e68a257';
+import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=037e68a257';
+import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=037e68a257';
+import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=037e68a257';
+import { lineConfig, liffIdToken } from './line-login.js?v=037e68a257';
+import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=037e68a257';
+import qrcode from './qr-code.js?v=037e68a257';
+import { statuses } from './platform-core.js?v=037e68a257';
+import { genderNames } from './member-store.js?v=037e68a257';
+import { splitName, formatPhone } from './person.js?v=037e68a257';
 
 let operator = null, ws = null, staff = null, page = 'home', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
 let query = '', category = '', onlyFavorites = false, hideOut = false;

@@ -1,12 +1,12 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, addFujiiSamples, wholesaleOf, ISSUER, salonAddress, referralSummary, monthBefore, billerInput, agencyPriceOf } from './supply-core.js?v=e2ee89ba4b';
-import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=e2ee89ba4b';
-import { validateProfile, profileComplete } from './member-store.js?v=e2ee89ba4b';
-import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=e2ee89ba4b';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=e2ee89ba4b';
-import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=e2ee89ba4b';
-import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=e2ee89ba4b';
-import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=e2ee89ba4b';
+import { supplyRequest, supplySnapshot, seedSupply, addFujiiSamples, wholesaleOf, ISSUER, salonAddress, referralSummary, monthBefore, billerInput, agencyPriceOf } from './supply-core.js?v=037e68a257';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=037e68a257';
+import { validateProfile, profileComplete } from './member-store.js?v=037e68a257';
+import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=037e68a257';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=037e68a257';
+import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=037e68a257';
+import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=037e68a257';
+import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=037e68a257';
 export const demoOperators = [
   // 管理会社は藤井企画（運営管理の画面 admin.html）。ディーラーは F.I.Tソリューション（BICMA）だけで、すべての仕入れ・出荷を受け持つ（ディーラーの画面 dealer.html）
   {id:'admin',role:'admin',name:'藤井企画 運営担当',email:'admin@example.test'},
