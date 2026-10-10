@@ -1,12 +1,12 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=df0c901379';
-import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=df0c901379';
-import { validateProfile, profileComplete } from './member-store.js?v=df0c901379';
-import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=df0c901379';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=df0c901379';
-import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=df0c901379';
-import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=df0c901379';
-import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=df0c901379';
+import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=d7ef2fed19';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=d7ef2fed19';
+import { validateProfile, profileComplete } from './member-store.js?v=d7ef2fed19';
+import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=d7ef2fed19';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=d7ef2fed19';
+import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=d7ef2fed19';
+import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=d7ef2fed19';
+import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=d7ef2fed19';
 export const demoOperators = [
   {id:'admin',role:'admin',name:'運営管理者',email:'admin@example.test'},
   {id:'salon-a',role:'salon',salonId:'lumiere',name:'LUMIÈRE 店舗担当',email:'salon@example.test'},

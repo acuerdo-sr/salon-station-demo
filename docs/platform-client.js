@@ -1,7 +1,7 @@
-import { api, isPages } from './api-client.js?v=df0c901379';
-import { createPlatform, platformRequest, migrate, demoOperators, DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=df0c901379';
-import { runSubscriptions } from './supply-core.js?v=df0c901379';
-import { SESSION_IDLE } from './member-store.js?v=df0c901379';
+import { api, isPages } from './api-client.js?v=d7ef2fed19';
+import { createPlatform, platformRequest, migrate, demoOperators, DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=d7ef2fed19';
+import { runSubscriptions } from './supply-core.js?v=d7ef2fed19';
+import { SESSION_IDLE } from './member-store.js?v=d7ef2fed19';
 export { api, isPages };
 const base=new URL('.',import.meta.url).pathname,key=`salon-platform-v1:${base}`,opKey=key+':operator';
 let catalogPromise;
@@ -21,7 +21,7 @@ export async function platform(route,method='GET',input){
       const selected=demoOperators.find(o=>o.email===String(input.email).trim().toLowerCase());if(!selected||input.password!==DEMO_OPERATOR_PASSWORD)throw Error('メールアドレスまたはパスワードが違います。');
       sessionStorage.setItem(opKey,JSON.stringify({id:selected.id,expiresAt:Date.now()+SESSION_IDLE}));return {operator:selected};
     }
-    catalogPromise??=fetch(new URL('./catalog.json?v=df0c901379',import.meta.url)).then(r=>{if(!r.ok)throw Error('商品データを取得できません。');return r.json();});
+    catalogPromise??=fetch(new URL('./catalog.json?v=d7ef2fed19',import.meta.url)).then(r=>{if(!r.ok)throw Error('商品データを取得できません。');return r.json();});
     let state,raw=localStorage.getItem(key);if(raw){try{state=JSON.parse(raw);}catch{throw Error('保存データを読み込めません。');}if(migrate(state,await catalogPromise))raw=null;}else state=createPlatform(await catalogPromise);
     const {member}=await api('/auth/me');
     // 期日を迎えた定期発注を作成する（サーバー版では一定間隔で自動実行）
