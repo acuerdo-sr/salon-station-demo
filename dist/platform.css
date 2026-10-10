@@ -504,3 +504,9 @@ html{scrollbar-gutter:stable}
 .store-body .my-salon small{color:var(--fc-mute);font-size:12px;letter-spacing:.06em}
 .store-body .my-salon-lead{margin:16px 0 6px;font-size:14px;line-height:1.8;color:var(--fc-sub)}
 .store-body #modal .detail-list{margin:10px 0 14px}
+/* ===== 会員登録：サロンはQRコードで決まる（表示だけ） / サロンの会員管理：担当スタッフの選択 ===== */
+.store-body .register-salon{display:grid;gap:2px;padding:14px 16px;border-radius:12px;background:var(--fc-grey)}
+.store-body .register-salon small{font-size:11px;color:var(--fc-mute)}
+.store-body .register-salon b{font-size:16px;color:var(--fc-ink)}
+.store-body .register-salon span{font-size:11px;color:var(--fc-mute)}
+.member-staff{min-width:120px;padding:6px 8px;font-size:12px}

@@ -1,12 +1,12 @@
 // 加盟店（サロン）の仕入れ画面。パソコン・スマートフォン・LINE ミニアプリで使う。
 // ログイン前はブランドを伝える画面（映像）。ログイン後は「前回と同じ内容で発注」「いつもの商品」「品番でまとめて発注」
 // 「最近買った商品」「発注履歴」「発送状況」を一番上に置き、少ない操作ですぐ発注できるようにする。新製品はその下。
-import { platform, isPages } from './platform-client.js?v=d7ef2fed19';
-import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=d7ef2fed19';
-import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=d7ef2fed19';
-import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=d7ef2fed19';
-import { lineConfig, liffIdToken } from './line-login.js?v=d7ef2fed19';
-import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=d7ef2fed19';
+import { platform, isPages } from './platform-client.js?v=f1e62b6e1b';
+import { supplyStatuses, supplySources, supplyIntervals, addDays, stockState, shipEstimate } from './supply-core.js?v=f1e62b6e1b';
+import { DEMO_OPERATOR_PASSWORD } from './platform-core.js?v=f1e62b6e1b';
+import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js?v=f1e62b6e1b';
+import { lineConfig, liffIdToken } from './line-login.js?v=f1e62b6e1b';
+import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js?v=f1e62b6e1b';
 
 let operator = null, ws = null, staff = null, page = 'home', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
 let query = '', category = '', onlyFavorites = false, hideOut = false;
@@ -141,7 +141,7 @@ async function loadStaff() { staff = await platform(staffUrl()); }
 const staffOf = id => staff.staff.find(s => s.id === id);
 function staffTab() {
   const list = staff?.staff || [];
-  return `${secHead('Staff', '担当スタッフ')}<p class="notice">お客様が会員登録・マイページで選ぶ「担当スタッフ」です。上から順にお客様の選択肢に表示されます。名前を変えても、担当のお客様はそのまま引き継がれます。</p>
+  return `${secHead('Staff', '担当スタッフ')}<p class="notice">お客様の「担当スタッフ」です。お客様は選ばず、サロンの管理画面の「会員管理」で、お客様ごとに設定します（この並び順で選択肢に出ます）。名前を変えても、担当のお客様はそのまま引き継がれます。</p>
     <form id="staff-form" class="supply-order staff-add"><label>新しいスタッフの名前<input name="name" maxlength="40" required placeholder="例：HARUKA" autocomplete="off"></label><button class="btn primary" type="submit">追加する</button></form>
     ${list.length ? list.map((s, i) => `<article class="supply-order staff-row"><div class="between"><div><b>${esc(s.name)}</b><small>担当のお客様 ${s.members}人</small></div><div class="staff-order"><button class="icon-btn" data-staff-move="${esc(s.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="${esc(s.name)}を上へ">↑</button><button class="icon-btn" data-staff-move="${esc(s.id)}" data-dir="1" ${i === list.length - 1 ? 'disabled' : ''} aria-label="${esc(s.name)}を下へ">↓</button></div></div>
       <div class="form-actions"><button class="btn outline small" data-staff-rename="${esc(s.id)}">名前を変更</button><button class="btn outline small" data-staff-delete="${esc(s.id)}">削除</button></div></article>`).join('') : empty('スタッフが登録されていません', '上の欄から追加してください。')}
@@ -199,7 +199,7 @@ document.addEventListener('click', async e => {
     if (b.dataset.add) { const p = productOf(b.dataset.add); addToCart(p, 1); shell(); toast(`${p.name}をカートに入れました。`); }
     if (b.dataset.staffMove) { await platform(staffUrl(b.dataset.staffMove), 'PATCH', { move: Number(b.dataset.dir) }); await loadStaff(); shell(); }
     if (b.dataset.staffRename) { const s = staffOf(b.dataset.staffRename); modal('スタッフ名の変更', `<form id="staff-rename-form" data-staff-id="${esc(s.id)}" class="stack"><label>スタッフ名<input name="name" value="${esc(s.name)}" maxlength="40" required></label><p class="subtle-note">担当のお客様（${s.members}人）はそのまま引き継がれます。過去の注文の担当者名は変わりません。</p><div id="form-error" class="error" role="alert"></div><button class="btn primary" type="submit">変更する</button></form>`); }
-    if (b.dataset.staffDelete) { const s = staffOf(b.dataset.staffDelete), others = staff.staff.filter(x => x.id !== s.id); modal('スタッフの削除', `<form id="staff-delete-form" data-staff-id="${esc(s.id)}" class="stack"><p>「${esc(s.name)}」を担当スタッフから削除します。お客様の選択肢にも表示されなくなります。</p>${s.members ? `<label>担当のお客様 ${s.members}人の引き継ぎ先<select name="transferTo"><option value="">指名なし</option>${others.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label>` : '<p class="subtle-note">担当のお客様はいません。</p>'}<p class="subtle-note">過去の注文には、注文時の担当者名が残ります。お客様はマイページで担当スタッフを選び直せます。</p><div id="form-error" class="error" role="alert"></div><button class="btn danger" type="submit">削除する</button></form>`); }
+    if (b.dataset.staffDelete) { const s = staffOf(b.dataset.staffDelete), others = staff.staff.filter(x => x.id !== s.id); modal('スタッフの削除', `<form id="staff-delete-form" data-staff-id="${esc(s.id)}" class="stack"><p>「${esc(s.name)}」を担当スタッフから削除します。会員管理の選択肢にも表示されなくなります。</p>${s.members ? `<label>担当のお客様 ${s.members}人の引き継ぎ先<select name="transferTo"><option value="">指名なし</option>${others.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label>` : '<p class="subtle-note">担当のお客様はいません。</p>'}<p class="subtle-note">過去の注文には、注文時の担当者名が残ります。担当は、管理画面の「会員管理」で設定し直せます。</p><div id="form-error" class="error" role="alert"></div><button class="btn danger" type="submit">削除する</button></form>`); }
     if (b.hasAttribute('data-line-demo')) { b.disabled = true; operator = (await platform('/operator/line-demo', 'POST', {})).operator; await load(); shell(); toast('LINEからログインしました（デモ）。'); }
     if (b.hasAttribute('data-line-link')) { operator = (await platform('/operator/line', 'POST', { idToken: lineToken })).operator; shell(); toast('LINEと連携しました。次回からLINEで開くだけでログインできます。'); }
     if (b.hasAttribute('data-logout')) { await platform('/operator/logout', 'POST', {}); setCart({}); page = 'home'; loginView(); }
@@ -231,7 +231,7 @@ document.addEventListener('submit', async e => {
       closeModal(); shell(); toast(`${r.added}商品をカートに入れました。${notes.join('　')}`); return;
     }
     if (form.id === 'login-form') { const { operator: op } = await platform('/operator/login', 'POST', f); if (op.role !== 'salon') { await platform('/operator/logout', 'POST', {}); throw Error('この画面は加盟店（美容室）のアカウント専用です。'); } operator = op; page = 'home'; await load(); shell(); return; }
-    if (form.id === 'staff-form') { await platform(staffUrl(), 'POST', { name: f.name }); await loadStaff(); shell(); toast(`${f.name.trim()} を追加しました。お客様の選択肢に表示されます。`); return; }
+    if (form.id === 'staff-form') { await platform(staffUrl(), 'POST', { name: f.name }); await loadStaff(); shell(); toast(`${f.name.trim()} を追加しました。会員管理で、お客様の担当に設定できます。`); return; }
     if (form.id === 'staff-rename-form') { await platform(staffUrl(form.dataset.staffId), 'PATCH', { name: f.name }); await loadStaff(); closeModal(); shell(); toast('スタッフ名を変更しました。'); return; }
     if (form.id === 'staff-delete-form') { await platform(staffUrl(form.dataset.staffId), 'DELETE', { transferTo: f.transferTo || '' }); await loadStaff(); closeModal(); shell(); toast('スタッフを削除しました。'); return; }
     const items = cartLines().map(p => ({ id: p.id, quantity: p.quantity, price: p.wholesalePrice }));

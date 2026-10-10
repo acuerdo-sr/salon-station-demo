@@ -1,15 +1,14 @@
 // LINEログイン・LIFF のクライアント側。ローカル版はサーバーの設定を問い合わせ、公開版（GitHub Pages）は体験用の疑似ログインになる。
-import { api, isPages } from './api-client.js?v=d7ef2fed19';
+import { api, isPages } from './api-client.js?v=f1e62b6e1b';
 let configPromise;
 export function lineConfig() {
   configPromise ??= isPages ? Promise.resolve({ enabled: true, demo: true, liffId: '', orderLiffId: '', notifications: false }) : api('/auth/line/config').then(c => ({ demo: false, ...c })).catch(() => ({ enabled: false, demo: false, liffId: '' }));
   return configPromise;
 }
-// LINEログイン開始URL。QR経由の店舗・担当スタッフはサーバー側で保持し、登録完了後に紐付ける。
-export function lineStartUrl({ salonId, staffId } = {}) {
+// LINEログイン開始URL。QRコードのサロンはサーバー側で保持し、登録完了後に紐付ける（担当スタッフはサロンが設定する）。
+export function lineStartUrl({ salonId } = {}) {
   const url = new URL('/api/auth/line/start', location.href);
   if (salonId) url.searchParams.set('salon', salonId);
-  if (staffId) url.searchParams.set('staff', staffId);
   return url.href;
 }
 function loadSdk() {

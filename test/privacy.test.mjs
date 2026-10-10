@@ -6,7 +6,7 @@ import { demoOperators } from '../dist/platform-core.js';
 import { memberRef, PRIVACY_VERSION, privacyPolicy } from '../dist/privacy.js';
 import { formatAddress } from '../dist/person.js';
 import { createMemberStore } from '../dist/member-store.js';
-import { engines } from './helpers/engines.mjs';
+import { engines, linkMember } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z';
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] };
@@ -35,7 +35,7 @@ for (const [name, create] of engines(now)) {
 
   run('headquarters sees aggregates and member numbers only; the salon sees its customers; dealers see what they need to ship', async e => {
     const customer = await e.member('kojin-taro', secret.name), ref = memberRef('kojin-taro');
-    await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, customer);
+    await linkMember(e.call, customer, 'lumiere', 'haruka');
     const order = await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: secret }, customer);
     await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'oil-smooth', quantity: 1, price: 2640 }], customer: secret }, customer);
     const hq = await e.call('/admin/snapshot', 'GET', undefined, admin), hqText = JSON.stringify(hq);
@@ -63,7 +63,7 @@ for (const [name, create] of engines(now)) {
 
   run('headquarters re-links a customer by member number without seeing who it is', async e => {
     const customer = await e.member('kojin-taro', secret.name), ref = memberRef('kojin-taro');
-    await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, customer);
+    await linkMember(e.call, customer, 'lumiere', 'haruka');
     await assert.rejects(e.call(`/admin/members/${ref}`, 'PATCH', { salonId: 'atelier', staffId: 'mio' }, salonOp), /権限/);
     await assert.rejects(e.call('/admin/members/M-NOTFOUND', 'PATCH', { salonId: 'atelier' }, admin), /会員番号/);
     const moved = await e.call(`/admin/members/${ref.toLowerCase()}`, 'PATCH', { salonId: 'atelier', staffId: 'mio' }, admin);

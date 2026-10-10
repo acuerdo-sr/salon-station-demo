@@ -9,7 +9,7 @@ const now='2026-09-15T03:00:00.000Z'; // 12:00 JST
 const admin={operator:demoOperators[0]},salon={operator:demoOperators[1]},dealer={operator:demoOperators[2]};
 const member={id:'buyer-a',name:'デモ 花子',email:'a@example.test',kana:'デモ ハナコ',phone:'090-0000-0000',gender:'2',birthday:'1990-01-01'};
 const customer={name:'デモ 花子',postal:'0000000',prefecture:'東京都',city:'架空市',street:'1-2-3',phone:'0300000000'};
-function fixture(){const s=createPlatform(products,now);s.orders=[];s.purchaseOrders=[];s.profiles=[];s.events=[];s.products.forEach(p=>p.stock=products.find(x=>x.id===p.id).stock);platformRequest(s,'/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},{member},now);return s;}
+function fixture(){const s=createPlatform(products,now);s.orders=[];s.purchaseOrders=[];s.profiles=[];s.events=[];s.products.forEach(p=>p.stock=products.find(x=>x.id===p.id).stock);platformRequest(s,'/profile','PATCH',{salonId:'lumiere'},{member},now);platformRequest(s,`/admin/members/${member.id}/staff`,'PATCH',{staffId:'haruka'},{operator:demoOperators[0]},now);return s;}
 const order=(s,salonId='lumiere',items=[{id:'shampoo-moist',quantity:1,price:2860}],at=now,actor={member})=>platformRequest(s,'/orders','POST',{requestKey:crypto.randomUUID(),salonId,items,customer},actor,at);
 
 test('closed site: guests get no products or quotes, members and operators do',()=>{

@@ -63,7 +63,7 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
       assert.equal(memberA.hash, undefined);
       assert.equal((await call('/auth/register', 'POST', details('A@example.test'))).status, 400);
       assert.equal((await call('/platform/bootstrap', 'GET', undefined, cookieA)).body.products.length, catalogProducts.length);
-      assert.equal((await call('/platform/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, cookieA)).status, 200);
+      assert.equal((await call('/platform/profile', 'PATCH', { salonId: 'lumiere' }, cookieA)).status, 200);
       const input = order(); const placed = await call('/platform/orders', 'POST', input, cookieA);
       assert.equal(placed.status, 200); orderA = placed.body;
       assert.equal((await call('/platform/orders', 'GET', undefined, cookieA)).body.length, 1);

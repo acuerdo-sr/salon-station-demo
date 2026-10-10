@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
-import { engines } from './helpers/engines.mjs';
+import { engines, linkMember } from './helpers/engines.mjs';
 
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] };
 const home = { name: '個人 太郎', postal: '1000001', prefecture: '東京都', city: '千代田区', street: '1-1', phone: '0312345678' };
@@ -24,10 +24,9 @@ for (const [name, create] of engines('2026-10-06T03:00:00.000Z')) {
       await assert.rejects(e.call('/admin/salons/atelier/staff', 'POST', { name: 'SORA' }, salonOp), /他店舗/);
       await assert.rejects(e.call(url(), 'POST', { name: 'SORA' }, sena), /権限/);
       assert.ok((await e.call('/admin/salons/atelier/staff', 'POST', { name: 'SORA' }, admin)).some(s => s.name === 'SORA'), '本部はどの店舗にも追加できる');
-      // お客様が選び、注文に担当者名が残る
+      // サロンがお客様の担当に設定し、注文に担当者名が残る
       const taro = await e.member('kojin-taro', '個人 太郎'), hanako = await e.member('kojin-hanako', '個人 花子');
-      await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: miku.id }, taro);
-      await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: miku.id }, hanako);
+      for (const m of [taro, hanako]) { await e.call('/profile', 'PATCH', { salonId: 'lumiere' }, m); await e.call(`/admin/members/${m.member.id}/staff`, 'PATCH', { staffId: miku.id }, salonOp); }
       const before = await e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: home }, taro);
       assert.equal(before.staffName, 'MIKU');
       const summary = await e.call(url(), 'GET', undefined, salonOp);
@@ -59,7 +58,7 @@ for (const [name, create] of engines('2026-10-06T03:00:00.000Z')) {
       assert.equal((await e.call('/profile', 'GET', undefined, taro)).staffId, 'haruka');
       assert.equal((await e.call('/profile', 'GET', undefined, hanako)).staffId, 'haruka');
       assert.equal((await e.call('/orders', 'GET', undefined, taro))[0].staffName, 'MIKU', '過去の注文の担当者名は残る');
-      await assert.rejects(e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: miku.id }, taro), /担当スタッフ/, '削除したスタッフは選べない');
+      await assert.rejects(e.call(`/admin/members/${taro.member.id}/staff`, 'PATCH', { staffId: miku.id }, salonOp), /担当スタッフ/, '削除したスタッフは選べない');
       await assert.rejects(e.call(url(miku.id), 'DELETE', {}, salonOp), /見つかりません/);
       // 指名なしへ引き継ぐ
       await e.call(url('haruka'), 'DELETE', { transferTo: '' }, salonOp);

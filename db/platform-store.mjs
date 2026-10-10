@@ -394,8 +394,9 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (!m) fail('会員ログインが必要です。', 401);
       if (m.salon_id && m.salon_id !== salon.id) fail('担当サロンの変更は、ご利用のサロンまたは運営本部にご依頼ください。', 403);
       if (!m.salon_id && !salon.enabled) fail('このサロンは現在ご利用いただけません。');
-      if (input.staffId && !salon.staff.some(s => s.id === input.staffId)) fail('担当スタッフを確認してください。');
-      await q.run('UPDATE members SET salon_id=?, staff_id=?, salon_linked_at=?, updated_at=? WHERE id=?', [salon.id, input.staffId || null, m.salon_linked_at || now, now, m.id]);
+      // 担当スタッフはお客様は選ばない。サロンが管理画面で設定する（/admin/members/:id/staff）
+      if (input?.staffId && input.staffId !== (m.staff_id || '')) fail('担当スタッフは、ご利用のサロンで設定します。', 403);
+      await q.run('UPDATE members SET salon_id=?, salon_linked_at=?, updated_at=? WHERE id=?', [salon.id, m.salon_linked_at || now, now, m.id]);
       await audit(q, actor.member, '会員サロン情報を保存', memberRef(m.id), now);
       return profileFrom(await memberRow(q, m.id));
     }
@@ -665,6 +666,19 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       await q.run('DELETE FROM salons WHERE id=?', [salon.id]);
       await audit(q, op, '店舗を削除', salon.id, now);
       return { deleted: salon.id };
+    }
+    // 担当スタッフの設定：お客様は選ばず、サロンが自店の会員に設定する（本部も設定できる）
+    const memberStaff = route.match(/^\/admin\/members\/([^/]+)\/staff$/);
+    if (memberStaff && method === 'PATCH') {
+      const op = requireOperator(actor, ['admin', 'salon']);
+      const key = decodeURIComponent(memberStaff[1]).trim().toUpperCase();
+      const m = (await memberRow(q, memberStaff[1])) || (await q.all('SELECT id, salon_id FROM members WHERE salon_id IS NOT NULL')).find(r => memberRef(r.id) === key);
+      if (!m?.salon_id || (op.role === 'salon' && m.salon_id !== op.salonId)) fail('会員が見つかりません。', 404);
+      const salon = await salonById(q, m.salon_id), staffId = String(input?.staffId || '');
+      if (staffId && !salon.staff.some(s => s.id === staffId)) fail('担当スタッフを確認してください。');
+      await q.run('UPDATE members SET staff_id=?, updated_at=? WHERE id=?', [staffId || null, now, m.id]);
+      await audit(q, op, '会員の担当スタッフを設定', memberRef(m.id), now);
+      return { ref: memberRef(m.id), staffId, staffName: salon.staff.find(s => s.id === staffId)?.name || '' };
     }
     const memberAction = route.match(/^\/admin\/members\/([^/]+)$/);
     if (memberAction && method === 'PATCH') {

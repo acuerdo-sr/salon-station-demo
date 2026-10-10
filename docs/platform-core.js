@@ -1,12 +1,12 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=d7ef2fed19';
-import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=d7ef2fed19';
-import { validateProfile, profileComplete } from './member-store.js?v=d7ef2fed19';
-import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=d7ef2fed19';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=d7ef2fed19';
-import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=d7ef2fed19';
-import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=d7ef2fed19';
-import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=d7ef2fed19';
+import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=f1e62b6e1b';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=f1e62b6e1b';
+import { validateProfile, profileComplete } from './member-store.js?v=f1e62b6e1b';
+import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=f1e62b6e1b';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=f1e62b6e1b';
+import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=f1e62b6e1b';
+import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=f1e62b6e1b';
+import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=f1e62b6e1b';
 export const demoOperators = [
   {id:'admin',role:'admin',name:'運営管理者',email:'admin@example.test'},
   {id:'salon-a',role:'salon',salonId:'lumiere',name:'LUMIÈRE 店舗担当',email:'salon@example.test'},
@@ -255,11 +255,12 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   if(route==='/profile'&&method==='PATCH'){
     if(!actor.member)fail('会員ログインが必要です。',401);const salon=salonFor(state,input?.salonId);
     const m=actor.member,previous=currentProfile(state,m);
-    // 担当店舗は初回の紐付け（QR・会員登録）で決まり、以後の変更は本部の「担当店舗の紐付け変更」で行う（仕様書 2.2.4）。
+    // 担当店舗は初回の紐付け（サロンのQRコード）で決まり、以後の変更は本部の「担当店舗の紐付け変更」で行う（仕様書 2.2.4）。
+    // 担当スタッフはお客様は選ばない。サロンが管理画面の「会員管理」で設定する（/admin/members/:id/staff）。
     if(previous&&previous.salonId!==salon.id)fail('担当サロンの変更は、ご利用のサロンまたは運営本部にご依頼ください。',403);
     if(!previous&&!salon.enabled)fail('このサロンは現在ご利用いただけません。');
-    if(input.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
-    const profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:input.staffId||'',createdAt:previous?.createdAt||now};
+    if(input?.staffId&&input.staffId!==(previous?.staffId||''))fail('担当スタッフは、ご利用のサロンで設定します。',403);
+    const profile={id:m.id,name:m.name,email:m.email,kana:m.kana||'',phone:m.phone||'',gender:m.gender||'',birthday:m.birthday||'',lineLinked:Boolean(m.lineId),salonId:salon.id,staffId:previous?.staffId||'',createdAt:previous?.createdAt||now};
     state.profiles=state.profiles.filter(p=>p.id!==profile.id);state.profiles.push(profile);log(state,actor.member,'会員サロン情報を保存',memberRef(profile.id),now);return clone(profile);
   }
   if(route==='/cart'||route==='/favorites'){
@@ -422,6 +423,16 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
     const op=requireOperator(actor,['admin']),key=decodeURIComponent(memberAction[1]).trim().toUpperCase(),matches=state.profiles.filter(p=>p.id===memberAction[1]||memberRef(p.id)===key);if(matches.length!==1)fail('会員番号に該当する会員が見つかりません。',404);const profile=matches[0];
     const salon=salonFor(state,input?.salonId);if(!salon.enabled&&salon.id!==profile.salonId)fail('受付を停止しているサロンには紐付けできません。',409);if(input?.staffId&&!salon.staff.some(s=>s.id===input.staffId))fail('担当スタッフを確認してください。');
     profile.salonId=salon.id;profile.staffId=input?.staffId||'';log(state,op,'会員の担当店舗を変更',memberRef(profile.id),now);return {ref:memberRef(profile.id),salonId:profile.salonId,staffId:profile.staffId};
+  }
+  // 担当スタッフの設定：お客様は選ばず、サロンが自店の会員に設定する（本部も設定できる）
+  const memberStaff=route.match(/^\/admin\/members\/([^/]+)\/staff$/);
+  if(memberStaff&&method==='PATCH'){
+    const op=requireOperator(actor,['admin','salon']),key=decodeURIComponent(memberStaff[1]).trim().toUpperCase(),profile=state.profiles.find(p=>p.id===memberStaff[1]||memberRef(p.id)===key);
+    if(!profile||op.role==='salon'&&profile.salonId!==op.salonId)fail('会員が見つかりません。',404);
+    const salon=state.salons.find(s=>s.id===profile.salonId),staffId=String(input?.staffId||'');
+    if(staffId&&!salon?.staff.some(s=>s.id===staffId))fail('担当スタッフを確認してください。');
+    profile.staffId=staffId;log(state,op,'会員の担当スタッフを設定',memberRef(profile.id),now);
+    return {ref:memberRef(profile.id),staffId,staffName:salon?.staff.find(s=>s.id===staffId)?.name||''};
   }
   // CSV出力の記録（美容室が自店のお客様の情報を含む一覧を出力するとき）。出力する行が自店の範囲内か確かめてから記録する。
   if(route==='/admin/exports'&&method==='POST'){

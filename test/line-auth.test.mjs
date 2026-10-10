@@ -39,7 +39,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     child=await startServer(port,dir,env);
     assert.deepEqual((await call('/auth/line/config')).body,{enabled:true,liffId:'liff-1',orderLiffId:'',notifications:true});
     // 認可URL：state / nonce / コールバックURL / スコープ
-    const first=await begin('','?salon=lumiere&staff=haruka');
+    const first=await begin('','?salon=lumiere&staff=haruka'); // staff は受け取らない（担当スタッフはサロンが設定する）
     assert.equal(first.location.origin,mockBase);assert.equal(first.location.pathname,'/oauth2/v2.1/authorize');
     assert.equal(first.location.searchParams.get('client_id'),'1234');assert.equal(first.location.searchParams.get('redirect_uri'),base+'/api/auth/line/callback');
     assert.equal(first.location.searchParams.get('scope'),'profile openid');assert.ok(first.location.searchParams.get('nonce'));
@@ -49,7 +49,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     const foreign=await finish(first.state);assert.ok(foreign.html.includes('reason=expired'));assert.equal(foreign.cookie,'');
     // 正常：Cookie 付与、QRの店舗・スタッフ付きでストアへ戻る、簡略登録、state Cookie は消す
     const ok=await finish(first.state,first.stateCookie);
-    assert.ok(ok.html.includes('shop_id=lumiere')&&ok.html.includes('staff=haruka')&&ok.html.includes('line=ok'));assert.match(ok.raw,/salon_session=[0-9a-f]{64}; HttpOnly/);assert.match(ok.raw,/salon_line_state=; [^,]*Max-Age=0/);
+    assert.ok(ok.html.includes('shop_id=lumiere')&&!ok.html.includes('staff=')&&ok.html.includes('line=ok'));assert.match(ok.raw,/salon_session=[0-9a-f]{64}; HttpOnly/);assert.match(ok.raw,/salon_line_state=; [^,]*Max-Age=0/);
     const me=(await call('/auth/me','GET',undefined,ok.cookie)).body.member;
     assert.equal(me.lineId,'U-oauth');assert.equal(me.name,'ライン 太郎');assert.match(me.email,/^line-[0-9a-f]{10}@example\.test$/);assert.equal(me.hash,undefined);
     // state の再利用は拒否、同じLINEユーザーの再ログインは同じ会員
@@ -83,7 +83,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal((await call('/auth/line/liff','POST',{})).status,400);
     const liff=await call('/auth/line/liff','POST',{idToken:'idtoken-liff'});
     assert.equal(liff.status,200);assert.equal(liff.body.member.lineId,'U-liff');assert.notEqual(liff.body.member.id,me.id);
-    assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},liff.cookie)).body.lineLinked,true);
+    assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere'},liff.cookie)).body.lineLinked,true);
     // 同じLINEユーザーの初回ログインが同時に届いても、1人の会員になる
     const race=await Promise.all([1,2,3].map(()=>call('/auth/line/liff','POST',{idToken:'idtoken-race'})));
     assert.deepEqual(race.map(r=>r.status),[200,200,200],JSON.stringify(race.map(r=>r.body)));assert.equal(new Set(race.map(r=>r.body.member.id)).size,1);

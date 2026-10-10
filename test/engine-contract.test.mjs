@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoOperators } from '../dist/platform-core.js';
 import { formatAddress } from '../dist/person.js';
-import { engines as createEngines } from './helpers/engines.mjs';
+import { engines as createEngines, linkMember } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z';
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
@@ -16,7 +16,7 @@ const engines = createEngines(now);
 const line = (id, quantity, price) => ({ id, quantity, price });
 const order = (e, actor, items, at = now, salonId = 'lumiere', effects = []) => e.call('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId, items, customer }, actor, at, effects);
 const stockOf = async (e, id) => (await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === id).stock;
-async function linked(e, id, salonId = 'lumiere', staffId = 'haruka') { const actor = await e.member(id); await e.call('/profile', 'PATCH', { salonId, staffId }, actor); return actor; }
+async function linked(e, id, salonId = 'lumiere', staffId = 'haruka') { const actor = await e.member(id); await linkMember(e.call, actor, salonId, staffId); return actor; }
 
 for (const [name, create] of engines) {
   const run = (title, body) => test(`${name}: ${title}`, async () => { const e = await create(); try { await body(e); } finally { await e.close(); } });
@@ -34,14 +34,18 @@ for (const [name, create] of engines) {
     await assert.rejects(e.call('/quote', 'POST', { salonId: 'lumiere', items: [line('shampoo-moist', 1, 2860)] }, {}), /ログイン/);
   });
 
-  run('salon link: first link sets the salon; members change only staff; the admin re-links and cannot use paused salons', async e => {
+  run('salon link: first link sets the salon; members cannot choose staff, their salon sets it; the admin re-links and cannot use paused salons', async e => {
     const a = await linked(e, 'a');
     const p = await e.call('/profile', 'GET', undefined, a);
     assert.equal(p.salonId, 'lumiere'); assert.equal(p.staffId, 'haruka'); assert.equal(p.salonName, 'LUMIÈRE 表参道'); assert.equal(p.salonEnabled, true);
     await assert.rejects(e.call('/profile', 'PATCH', { salonId: 'atelier', staffId: '' }, a), /運営本部/);
-    await assert.rejects(e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'mio' }, a), /担当スタッフ/);
-    assert.equal((await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'yui' }, a)).staffId, 'yui');
+    await assert.rejects(e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'yui' }, a), /サロンで設定/);
+    assert.equal((await e.call('/profile', 'PATCH', { salonId: 'lumiere' }, a)).staffId, 'haruka', '保存し直しても担当はそのまま');
+    assert.deepEqual(await e.call('/admin/members/a/staff', 'PATCH', { staffId: 'yui' }, salonOp), { ref: (await e.call('/admin/snapshot', 'GET', undefined, salonOp)).profiles.find(p => p.id === 'a').ref, staffId: 'yui', staffName: 'YUI' });
+    await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: 'mio' }, salonOp), /担当スタッフ/, '他店のスタッフは選べない');
+    await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: 'yui' }, sena), /権限/);
     assert.equal((await e.call('/admin/members/a', 'PATCH', { salonId: 'atelier', staffId: 'mio' }, admin)).salonId, 'atelier');
+    await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: '' }, salonOp), /見つかりません/, '他店の会員は操作できない');
     await assert.rejects(e.call('/admin/members/a', 'PATCH', { salonId: 'atelier' }, salonOp), /権限/);
     await e.call('/admin/salons/mori', 'PATCH', { enabled: false }, admin);
     await assert.rejects(e.call('/admin/members/a', 'PATCH', { salonId: 'mori' }, admin), /受付を停止/);

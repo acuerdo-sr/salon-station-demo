@@ -2,13 +2,18 @@
 // DB版は本番と同じく、お客様の個人情報を暗号化して保存する（テストごとに新しい鍵）。
 import { randomBytes } from 'node:crypto';
 import { products, concernCategories } from '../../catalog.mjs';
-import { createPlatform, platformRequest } from '../../dist/platform-core.js';
+import { createPlatform, platformRequest, demoOperators } from '../../dist/platform-core.js';
 import { createSqliteAdapter, createMysqlAdapter } from '../../db/adapter.mjs';
 import { createPlatformStore } from '../../db/platform-store.mjs';
 import { createFieldCrypto } from '../../db/crypto.mjs';
 
 export const TABLES = ['mail_outbox', 'password_resets', 'member_cards', 'data_access_logs', 'supply_subscription_items', 'supply_subscriptions', 'supply_order_items', 'invoices', 'supply_orders', 'notifications', 'audit_logs', 'stock_movements', 'refunds', 'payments', 'order_events', 'order_items', 'purchase_orders', 'orders', 'favorites', 'supply_favorites', 'cart_items', 'operator_sessions', 'operators', 'member_addresses', 'member_sessions', 'members', 'product_concerns', 'products', 'concerns', 'categories', 'staff', 'salons', 'dealers', 'counters', 'app_meta'];
 
+// お客様の紐付け：会員はQRコードのサロンを保存するだけ。担当スタッフはサロン側（ここでは本部の操作）で設定する
+export async function linkMember(call, actor, salonId = 'lumiere', staffId = '') {
+  await call('/profile', 'PATCH', { salonId }, actor);
+  if (staffId) await call(`/admin/members/${actor.member.id}/staff`, 'PATCH', { staffId }, { operator: demoOperators[0] });
+}
 // 会員マスタのフリガナは必須（注文時に確認する）
 export const KANA = 'デモ ハナコ';
 async function sqlEngine(db, now) {

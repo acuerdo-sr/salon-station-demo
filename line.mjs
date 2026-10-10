@@ -27,7 +27,7 @@ const STATE_AGE = 10 * 60 * 1000;
 const MAX_STATES = 5000;
 
 export function createLineAuth(auth, config, options = {}) {
-  const states = new Map(); // state → { nonce, salonId, staffId, memberId, createdAt }
+  const states = new Map(); // state → { nonce, salonId, memberId, createdAt }
   const fetchImpl = options.fetch || fetch;
   function fail(message, status = 400, code = 'failed') { const error = new Error(message); error.status = status; error.code = code; throw error; }
   function cleanup() {
@@ -78,7 +78,7 @@ export function createLineAuth(auth, config, options = {}) {
       if (!config.enabled) fail('LINEログインは未設定です。README の「LINE連携の設定」を参照してください。', 404);
       cleanup();
       const state = randomBytes(16).toString('hex'), nonce = randomBytes(16).toString('hex');
-      states.set(state, { nonce, salonId: String(query.get('salon') || '').slice(0, 20), staffId: String(query.get('staff') || '').slice(0, 20), memberId: currentMember?.id || '', createdAt: Date.now() });
+      states.set(state, { nonce, salonId: String(query.get('salon') || '').slice(0, 20), memberId: currentMember?.id || '', createdAt: Date.now() });
       const url = new URL('/oauth2/v2.1/authorize', config.authBase);
       url.search = new URLSearchParams({ response_type: 'code', client_id: config.channelId, redirect_uri: config.callbackUrl, state, scope: config.scope, nonce }).toString();
       return { url: url.href, state };
@@ -98,7 +98,7 @@ export function createLineAuth(auth, config, options = {}) {
       const payload = await verifyIdToken(token.id_token, saved.nonce);
       const current = saved.memberId ? await auth.findById(saved.memberId) : null;
       const member = await resolveMember(payload, current);
-      return { member, redirect: frontUrl({ shop_id: saved.salonId, staff: saved.staffId, line: current ? 'linked' : 'ok' }) };
+      return { member, redirect: frontUrl({ shop_id: saved.salonId, line: current ? 'linked' : 'ok' }) };
     },
     // LIFF（LINEアプリ内）：クライアントが取得したIDトークンを検証してセッションを作る。
     async liff(input, currentMember) {

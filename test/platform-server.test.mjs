@@ -14,7 +14,7 @@ test('HTTP: operator session, role isolation, atomic oversell protection and res
   assert.equal((await call('/platform/operator/login','POST',{email:'admin@example.test',password:'bad'})).status,401);
   const a=await call('/platform/operator/login','POST',{email:'admin@example.test',password:'Demo-Admin-2026'});assert.equal(a.status,200);const ac=a.cookie;
   const m=await call('/auth/register','POST',{name:'デモ 利用者',kana:'デモ リヨウシャ',salon:'LUMIÈRE',email:'buyer@example.test',password:'Demo-Member-2026',agreePrivacy:true}),mc=m.cookie;
-  assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:'haruka'},mc)).status,200);
+  assert.equal((await call('/platform/profile','PATCH',{salonId:'lumiere'},mc)).status,200);
   const before=(await call('/platform/admin/snapshot','GET',undefined,ac)).body.orders.length;
   await call('/platform/admin/products/shampoo-moist','PATCH',{stock:1,price:2860,cost:1716,enabled:true},ac);
   const order={salonId:'lumiere',items:[{id:'shampoo-moist',price:2860,quantity:1}],customer:{name:'デモ 利用者',postal:'0000000',prefecture:'東京都',city:'架空市',street:'1-2-3',phone:'0300000000'}};

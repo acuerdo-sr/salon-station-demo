@@ -18,7 +18,7 @@ import { createSqliteAdapter } from '../db/adapter.mjs';
 import { createPlatformStore } from '../db/platform-store.mjs';
 import { createFieldCrypto, loadDataKey, isEncrypted } from '../db/crypto.mjs';
 import { createAuth } from '../auth.mjs';
-import { engines } from './helpers/engines.mjs';
+import { engines, linkMember } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z', later = minutes => new Date(Date.parse(now) + minutes * 60000).toISOString();
 const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
@@ -61,7 +61,7 @@ for (const [name, create] of engines(now)) {
 
   run('screens that carry personal data are recorded per salon, once per 30 minutes unless the count changes; headquarters is not recorded', async e => {
     const taro = await e.member('kojin-taro', secret.name);
-    await e.call('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, taro);
+    await linkMember(e.call, taro, 'lumiere', 'haruka');
     await placeOrder(e, taro, [{ id: 'shampoo-moist', quantity: 1, price: 2860 }, { id: 'oil-smooth', quantity: 1, price: 2640 }]);
     // 本部は集計値と会員番号だけを受け取るので記録しない
     assert.deepEqual((await e.call('/admin/snapshot', 'GET', undefined, { ...admin, ip: '203.0.113.9' })).accessLogs, []);
@@ -125,7 +125,7 @@ async function encryptedStore(db, key = randomBytes(32)) {
 async function registerCustomer({ store, auth }, email = 'Kojin-Taro@example.test') {
   const registered = await auth.request('/api/auth/register', 'POST', { salon: 'x', name: secret.name, kana: 'コジン タロウ', phone: '090-1234-5678', email, password: 'Demo-Member-2026', agreePrivacy: true }, fakeReq(), fakeRes());
   const member = { member: registered.member };
-  await store.request('/profile', 'PATCH', { salonId: 'lumiere', staffId: 'haruka' }, member, now);
+  await linkMember((r, m, i, a) => store.request(r, m, i, a, now), member, 'lumiere', 'haruka');
   await store.request('/orders', 'POST', { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [{ id: 'shampoo-moist', quantity: 1, price: 2860 }], customer: secret }, member, now);
   return registered.member;
 }
