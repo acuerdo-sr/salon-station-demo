@@ -104,7 +104,7 @@ for (const [name, create] of engines(now)) {
     ws = await e.call('/supply', 'GET', undefined, salonOp, later(30));
     assert.equal(ws.subscriptions.find(s => s.id === sub.id).nextRunOn, '2026-11-17');
     // 在庫が足りないと作成せず、結果を残して次回へ進める
-    await e.call('/admin/products/shampoo-air', 'PATCH', { stock: 1, price: 2640, cost: 1584, enabled: true }, admin);
+    await e.call('/admin/products/shampoo-air', 'PATCH', { stock: 1, price: 2640, enabled: true }, admin);
     const failed = await e.call('/admin/supply/run', 'POST', {}, admin, later(42));
     assert.equal(failed.failed.length, 1); assert.match(failed.failed[0].message, /在庫/);
     const after = (await e.call('/supply', 'GET', undefined, salonOp, later(42))).subscriptions.find(s => s.id === sub.id);
@@ -192,10 +192,20 @@ for (const [name, create] of engines(now)) {
     await assert.rejects(e.call('/admin/invoices/' + byDealer[0].id, 'PATCH', { status: 'paid' }, admin), /F.I.T/);
   });
 
+  run('the agency price F.I.T sets is what F.I.T bills 藤井企画 for 藤井企画-billed salons; salons never see it', async e => {
+    await e.call('/admin/products/shampoo-moist', 'PATCH', { agencyPrice: 1600 }, dealer);
+    const o = await e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity: 2, price: 1859 }] }, otherSalon);
+    assert.equal(o.agencyTotal, undefined, '加盟店には代理店価格を見せない');
+    const seen = (await e.call('/admin/snapshot', 'GET', undefined, admin)).supplyOrders.find(x => x.id === o.id);
+    assert.deepEqual([seen.biller, seen.agencyTotal], ['fujii', 3200], 'F.I.T が設定した代理店価格で藤井企画へ請求');
+    assert.ok((await e.call('/supply', 'GET', undefined, otherSalon)).orders.every(x => x.agencyTotal === undefined));
+    assert.ok((await e.call('/supply', 'GET', undefined, otherSalon)).products.every(p => p.cost === undefined && p.agencyPrice === undefined));
+  });
+
   run('admin sets the wholesale price; dealers cannot', async e => {
-    assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, cost: 1716, wholesalePrice: 2000, enabled: true }, admin)).wholesalePrice, 2000);
-    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, cost: 1716, wholesalePrice: 3000, enabled: true }, admin), /卸価格は売価以下/);
-    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, wholesalePrice: 1 }, dealer), /在庫数のみ/);
+    assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, wholesalePrice: 2000, enabled: true }, admin)).wholesalePrice, 2000);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, wholesalePrice: 3000, enabled: true }, admin), /卸価格は売価以下/);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, wholesalePrice: 1 }, dealer), /在庫数・仕入単価・代理店価格/);
     assert.equal((await e.call('/supply', 'GET', undefined, salonOp)).products.find(p => p.id === 'shampoo-moist').wholesalePrice, 2000);
     await assert.rejects(supplyOrder(e, [{ id: 'shampoo-moist', quantity: 1, price: 1859 }]), /卸価格/);
   });

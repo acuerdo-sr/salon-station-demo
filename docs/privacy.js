@@ -12,6 +12,30 @@ export const privacyPolicy = [
 export const memberRef = id => 'M-' + String(id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-8).toUpperCase();
 // 操作履歴に残す名前：管理アカウントは名前、お客様は会員番号（本部の画面に氏名を残さない）
 export const actorLabel = actor => actor?.role ? actor.name : actor?.id ? `会員 ${memberRef(actor.id)}` : (actor?.name || '会員');
+// 仕入原価（F.I.Tソリューション がメーカーから仕入れる値）と F.I.T の利益は F.I.T だけが見る。藤井企画・加盟店には渡さない。
+// 代理店価格（F.I.T から藤井企画への卸値）は藤井企画と F.I.T だけ（加盟店には渡さない）
+export function productFor(role, product) {
+  if (role === 'dealer') return product;
+  const { cost, ...rest } = product;
+  if (role !== 'admin') delete rest.agencyPrice;
+  return rest;
+}
+const itemsFor = items => (items || []).map(({ cost, ...item }) => item);
+// 加盟店への仕入れの応答から、代理店価格の合計（藤井企画の仕入れ値）を外す
+export const withoutAgency = value => value === undefined ? value : JSON.parse(JSON.stringify(value, (key, v) => key === 'agencyTotal' ? undefined : v));
+// 管理画面のスナップショットから、役割に見せない金額を外す（ブラウザ版・DB版で共有）
+export function hideCosts(role, snap) {
+  if (role === 'dealer') return snap;
+  return {
+    ...snap,
+    products: (snap.products || []).map(p => productFor(role, p)),
+    orders: (snap.orders || []).map(o => ({ ...o, items: itemsFor(o.items) })),
+    // EC注文の出荷指示の金額（仕入単価×数量＋配送費）も仕入原価が分かるので外す
+    purchaseOrders: (snap.purchaseOrders || []).map(({ total, ...p }) => ({ ...p, items: itemsFor(p.items) })),
+    settlements: (snap.settlements || []).map(({ purchase, dealerNet, ...s }) => s),
+    supplyOrders: role === 'admin' ? snap.supplyOrders : (snap.supplyOrders || []).map(({ agencyTotal, ...o }) => o),
+  };
+}
 // 役割ごとのお届け先情報：サロンは全項目、ディーラーは発送に必要な項目だけ、本部は会員番号だけ
 export function customerFor(role, customer, memberId) {
   if (role === 'salon') return customer;

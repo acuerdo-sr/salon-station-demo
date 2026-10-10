@@ -6,20 +6,20 @@ import {
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
   settlement, requireOperator, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
   addressInput, sortAddresses, addressView, cardView, sortCards, shipmentLabel, MAX_ADDRESSES,
-  salonTerms,
+  salonTerms, DEMO_COST_RATE,
 } from '../dist/platform-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from '../dist/payment-core.js';
 import { validateProfile, profileComplete } from '../dist/member-store.js';
 import { encodeAddress, decodeAddress } from '../dist/person.js';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES, legacyImages } from '../dist/catalog-core.js';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, priceInput, ownPrices, dealerPriceCheck, decodeImage, newProductId, newCategoryId, MAX_IMAGE_BYTES, legacyImages } from '../dist/catalog-core.js';
 import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from '../dist/shipping-csv.js';
 import { ISSUER, salonAddress, referralSummary, monthBefore } from '../dist/supply-core.js';
 import { schemaTable } from './adapter.mjs';
 import { passwordDigest } from '../dist/member-store.js';
 import { importState } from './import-state.mjs';
 import { createSupplyStore } from './supply-store.mjs';
-import { wholesaleOf } from '../dist/supply-core.js';
-import { memberRef, actorLabel, customerFor, orderForRole } from '../dist/privacy.js';
+import { wholesaleOf, agencyPriceOf } from '../dist/supply-core.js';
+import { memberRef, actorLabel, customerFor, orderForRole, productFor, hideCosts, withoutAgency } from '../dist/privacy.js';
 import { viewEntries, shouldRecordView, exportInput, lookupInput, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from '../dist/access-log.js';
 import { createFieldCrypto, openRow, sealRow, isSealed, SEALED_COLUMNS } from './crypto.mjs';
 
@@ -31,7 +31,7 @@ const READ_ONLY = new Set(['/quote', '/admin/sales']);
 const QUIET = new Set(['/cart', '/favorites', '/supply/favorites', '/admin/exports', '/admin/shipping-csv']);
 const quiet = route => QUIET.has(route) || /^\/(addresses|payment-methods)(\/|$)/.test(route);
 const SNAPSHOT_LIMIT = 1000;
-export const SCHEMA_VERSION = '9';
+export const SCHEMA_VERSION = '10';
 const KEY_CHECK = 'salon-station:key-check';
 // アクセス記録は追記のみ（SQLite）。MySQL ではアプリ用ユーザーに UPDATE / DELETE の権限を与えない（db/grants.mysql.sql）。
 const APPEND_ONLY_SQLITE = `CREATE TRIGGER IF NOT EXISTS data_access_logs_no_update BEFORE UPDATE ON data_access_logs BEGIN SELECT RAISE(ABORT, 'アクセス記録は変更できません'); END;
@@ -63,7 +63,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const rows = await q.all(`SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON c.id=p.category_id${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY p.sort_order, p.id`, params);
     if (!rows.length) return [];
     const concerns = await q.all(`SELECT pc.product_id, n.name FROM product_concerns pc JOIN concerns n ON n.id=pc.concern_id WHERE pc.product_id IN (${marks(rows)}) ORDER BY n.sort_order`, rows.map(r => r.id));
-    return rows.map(r => ({ id: r.id, brand: r.brand, name: r.name, category: r.category_name, concerns: concerns.filter(c => c.product_id === r.id).map(c => c.name), size: r.size, price: num(r.price), stock: num(r.stock), image: r.image, tag: r.tag, summary: r.summary || '', description: r.description, sku: r.sku, enabled: bool(r.enabled), dealerId: r.dealer_id, ...(withCost ? { cost: num(r.cost), wholesalePrice: num(r.wholesale_price) } : {}) }));
+    return rows.map(r => ({ id: r.id, brand: r.brand, name: r.name, category: r.category_name, concerns: concerns.filter(c => c.product_id === r.id).map(c => c.name), size: r.size, price: num(r.price), stock: num(r.stock), image: r.image, tag: r.tag, summary: r.summary || '', description: r.description, sku: r.sku, enabled: bool(r.enabled), dealerId: r.dealer_id, ...(withCost ? { cost: num(r.cost), wholesalePrice: num(r.wholesale_price), agencyPrice: num(r.agency_price) } : {}) }));
   }
   const loadDealers = async (q, dealerId) => (await q.all(`SELECT * FROM dealers${dealerId ? ' WHERE id=?' : ''} ORDER BY id DESC`, dealerId ? [dealerId] : [])).map(d => ({ id: d.id, name: d.name, short: d.short_name, area: d.area, lead: d.lead_time }));
   const profileFrom = m => ({ id: m.id, name: m.name, email: m.email, kana: m.kana, phone: m.phone, gender: m.gender, birthday: m.birthday, lineLinked: Boolean(m.line_id), salonId: m.salon_id, staffId: m.staff_id || '', createdAt: m.salon_linked_at || m.created_at });
@@ -274,7 +274,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const salons = await loadSalons(q, { ids: salonIds });
     // 個人情報を渡す場合（美容室・ディーラー）は、渡す前にアクセス記録を残す
     await recordViews(q, op, actor.ip, viewEntries(op, { members: members.map(m => m.id), orders: orders.map(o => ({ salonId: o.row.salon_id, memberId: o.row.member_id })), shipments: poRows.map(p => ({ salonId: p.salon_id, memberId: p.member_id })) }), now);
-    return {
+    // 仕入原価と F.I.T の利益は F.I.T だけ、代理店価格は藤井企画と F.I.T だけ（dist/privacy.js）
+    return hideCosts(op.role, {
       operator: op, revision: await revision(q),
       products: await loadProducts(q, { dealerId: op.role === 'dealer' ? op.dealerId : undefined, withCost: true }),
       salons, dealers,
@@ -290,7 +291,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       events: op.role === 'admin' ? (await q.all('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 400')).map(e => ({ id: String(e.id), at: e.occurred_at, actor: e.actor, action: e.action, reference: e.reference })) : [],
       accessLogs: await accessLogs(q, op),
       ...(await supply.snapshot(q, op)),
-    };
+    });
   }
   async function salesReport(q, input, actor, now) {
     const op = requireOperator(actor, ['admin', 'salon']);
@@ -503,17 +504,19 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       await audit(q, op, '返品検品・返金完了', order.id, now);
       return orderById(q, order.id);
     }
-    // 商品登録・編集（仕様書 2.1.1）。本部は全項目と画像、ディーラーは在庫数だけ
+    // 商品登録・編集（仕様書 2.1.1）。藤井企画は仕入単価・代理店価格以外の全項目と画像、F.I.T は在庫数・仕入単価・代理店価格
+    // 新しい商品の仕入単価・代理店価格は、F.I.T が設定するまで売価の50%・55%（仮）
     if (route === '/admin/products' && method === 'POST') {
-      const op = requireOperator(actor, ['admin']), fields = productInput(input, await catalogContext(q));
+      const op = requireOperator(actor, ['admin']); ownPrices('admin', input);
+      const price = Number(input?.price), fields = productInput({ ...input, cost: Math.round(price * DEMO_COST_RATE), agencyPrice: agencyPriceOf(price) }, await catalogContext(q));
       fields.sku = await nextProductSku(q);
       const id = newProductId(), image = input?.imageData ? saveImage(input.imageData) : '', sort = num((await q.get('SELECT MAX(sort_order) AS n FROM products'))?.n) + 1;
-      await q.run('INSERT INTO products (id, sku, brand, name, category_id, size, summary, description, image, tag, price, cost, wholesale_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)',
-        [id, fields.sku, fields.brand, fields.name, fields.categoryId, fields.size, fields.summary, fields.description, image, fields.tag, fields.price, fields.cost, fields.wholesalePrice, fields.dealerId, fields.stock, fields.enabled ? 1 : 0, sort, now]);
+      await q.run('INSERT INTO products (id, sku, brand, name, category_id, size, summary, description, image, tag, price, cost, wholesale_price, agency_price, tax_rate, dealer_id, stock, enabled, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)',
+        [id, fields.sku, fields.brand, fields.name, fields.categoryId, fields.size, fields.summary, fields.description, image, fields.tag, fields.price, fields.cost, fields.wholesalePrice, fields.agencyPrice, fields.dealerId, fields.stock, fields.enabled ? 1 : 0, sort, now]);
       await saveConcerns(q, id, fields.concerns);
       if (fields.stock) await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'initial', '', ?, ?)", [id, fields.stock, op.name, now]);
       await audit(q, op, '商品を登録', fields.sku, now);
-      return (await loadProducts(q, { ids: [id], withCost: true }))[0];
+      return productFor(op.role, (await loadProducts(q, { ids: [id], withCost: true }))[0]);
     }
     const productAction = route.match(/^\/admin\/products\/([^/]+)$/);
     if (productAction && method === 'PATCH') {
@@ -522,29 +525,33 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (op.role === 'dealer' && p.dealerId !== op.dealerId) fail('他社の商品は操作できません。', 403);
       let stock;
       if (op.role === 'admin') {
+        ownPrices('admin', input);
         const ctx = await catalogContext(q), u = productInput({ ...p, categoryId: ctx.categories.find(x => x.name === p.category)?.id, ...input }, ctx);
         const image = input?.imageData ? saveImage(input.imageData) : p.image;
-        await q.run('UPDATE products SET brand=?, name=?, category_id=?, size=?, summary=?, description=?, image=?, tag=?, price=?, cost=?, wholesale_price=?, dealer_id=?, stock=?, enabled=?, updated_at=? WHERE id=?',
-          [u.brand, u.name, u.categoryId, u.size, u.summary, u.description, image, u.tag, u.price, u.cost, u.wholesalePrice, u.dealerId, u.stock, u.enabled ? 1 : 0, now, p.id]);
+        await q.run('UPDATE products SET brand=?, name=?, category_id=?, size=?, summary=?, description=?, image=?, tag=?, price=?, wholesale_price=?, dealer_id=?, stock=?, enabled=?, updated_at=? WHERE id=?',
+          [u.brand, u.name, u.categoryId, u.size, u.summary, u.description, image, u.tag, u.price, u.wholesalePrice, u.dealerId, u.stock, u.enabled ? 1 : 0, now, p.id]);
         await saveConcerns(q, p.id, u.concerns);
         stock = u.stock;
       } else {
-        if (['price', 'cost', 'enabled', 'wholesalePrice', 'sku', 'name', 'brand', 'categoryId', 'concerns', 'size', 'summary', 'description', 'tag', 'dealerId', 'imageData'].some(k => input?.[k] !== undefined)) fail('ディーラーは在庫数のみ更新できます。', 403);
-        stock = int(input?.stock, 0, 99999);
-        await q.run('UPDATE products SET stock=?, updated_at=? WHERE id=?', [stock, now, p.id]);
+        if (['price', 'enabled', 'wholesalePrice', 'sku', 'name', 'brand', 'categoryId', 'concerns', 'size', 'summary', 'description', 'tag', 'dealerId', 'imageData'].some(k => input?.[k] !== undefined)) fail('ディーラーが変えられるのは在庫数・仕入単価・代理店価格です。', 403);
+        const next = priceInput({ ...p, ...(input?.cost !== undefined ? { cost: input.cost } : {}), ...(input?.agencyPrice !== undefined ? { agencyPrice: input.agencyPrice } : {}) }); dealerPriceCheck(next);
+        stock = input?.stock !== undefined ? int(input.stock, 0, 99999) : p.stock;
+        await q.run('UPDATE products SET stock=?, cost=?, agency_price=?, updated_at=? WHERE id=?', [stock, next.cost, next.agencyPrice, now, p.id]);
       }
       if (stock !== p.stock) await q.run("INSERT INTO stock_movements (product_id, delta, reason, reference, actor, occurred_at) VALUES (?, ?, 'adjust', '', ?, ?)", [p.id, stock - p.stock, op.name, now]);
       await audit(q, op, '商品・在庫を更新', p.sku, now);
-      return (await loadProducts(q, { ids: [p.id], withCost: true }))[0];
+      return productFor(op.role, (await loadProducts(q, { ids: [p.id], withCost: true }))[0]);
     }
     // 価格の一括更新（管理画面の価格一括編集）。すべての行を確かめてから保存する（1つでも誤りがあれば何も変えない）
     if (route === '/admin/product-prices' && method === 'PATCH') {
-      const op = requireOperator(actor, ['admin']), rows = priceRowsInput(input), current = await loadProducts(q, { ids: rows.map(r => r.id), withCost: true });
-      const updates = rows.map(r => { const p = current.find(x => x.id === r.id) || fail('商品が見つかりません。画面を読み込み直してください。', 404); return [p, applyPriceRow(r, p)]; });
+      // 藤井企画は売価・卸価格、F.I.T は仕入単価・代理店価格
+      const op = requireOperator(actor, ['admin', 'dealer']), rows = priceRowsInput(input, op.role), current = await loadProducts(q, { ids: rows.map(r => r.id), withCost: true });
+      const updates = rows.map(r => { const p = current.find(x => x.id === r.id) || fail('商品が見つかりません。画面を読み込み直してください。', 404); if (op.role === 'dealer' && p.dealerId !== op.dealerId) fail('他社の商品は操作できません。', 403); return [p, applyPriceRow(r, p, op.role)]; });
       let updated = 0;
       for (const [p, u] of updates) {
         if (!u.changed.length) continue;
-        await q.run('UPDATE products SET price=?, cost=?, wholesale_price=?, updated_at=? WHERE id=?', [u.price, u.cost, u.wholesalePrice, now, p.id]);
+        const next = { ...p, ...Object.fromEntries(u.changed.map(k => [k, u[k]])) };
+        await q.run('UPDATE products SET price=?, cost=?, wholesale_price=?, agency_price=?, updated_at=? WHERE id=?', [next.price, next.cost, next.wholesalePrice, next.agencyPrice, now, p.id]);
         await audit(q, op, `価格を一括更新（${u.summary}）`, p.sku, now);
         updated++;
       }
@@ -722,7 +729,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     }
     // 加盟店からの仕入発注・定期発注・月次請求（db/supply-store.mjs）
     const supplyResult = await supply.handle(q, route, method, input, actor, now, effects);
-    if (supplyResult !== undefined) return supplyResult;
+    if (supplyResult !== undefined) return actor.operator?.role === 'salon' ? withoutAgency(supplyResult) : supplyResult;
     fail('この操作は利用できません。', 404);
   }
   const supply = createSupplyStore({ db, loadProducts, audit, customerStats });
@@ -815,6 +822,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       if (await db.tableExists('orders') && (await db.tableColumns('orders')).includes('ship_name') && !(await db.tableColumns('orders')).includes('payment_method')) await upgradeOrdersV5();
       const addColumn = async (table, column, sqliteType, mysqlType) => { if (await db.tableExists(table) && !(await db.tableColumns(table)).includes(column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${db.dialect === 'mysql' ? mysqlType : sqliteType}`); };
       await addColumn('member_addresses', 'phone', "TEXT NOT NULL DEFAULT ''", "VARCHAR(256) NOT NULL DEFAULT '' AFTER address");
+      // 版10：代理店価格（F.I.T から藤井企画への卸値。F.I.T が設定する）。以前の商品は売価の55%
+      const addedAgency10 = await db.tableExists('products') && !(await db.tableColumns('products')).includes('agency_price');
+      await addColumn('products', 'agency_price', 'INTEGER NOT NULL DEFAULT 0', 'INT NOT NULL DEFAULT 0 AFTER wholesale_price');
+      if (addedAgency10) for (const r of await db.all('SELECT id, price FROM products')) await db.run('UPDATE products SET agency_price=? WHERE id=?', [agencyPriceOf(num(r.price)), r.id]);
       // 版9：紹介料率を EC と仕入れで分け、仕入れの請求元を加盟店ごとに（以前の加盟店は藤井企画。以前の仕入れ・請求書は F.I.T）
       await addColumn('salons', 'supply_fee_rate', 'INTEGER NOT NULL DEFAULT 15', 'INT NOT NULL DEFAULT 15 AFTER fee_rate');
       await addColumn('salons', 'supply_biller', "TEXT NOT NULL DEFAULT 'fujii'", "VARCHAR(10) NOT NULL DEFAULT 'fujii' AFTER supply_fee_rate");

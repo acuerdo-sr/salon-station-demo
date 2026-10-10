@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS products (
   id VARCHAR(40) PRIMARY KEY, sku VARCHAR(40) NOT NULL UNIQUE, brand VARCHAR(100) NOT NULL, name VARCHAR(100) NOT NULL,
   category_id VARCHAR(40) NOT NULL, size VARCHAR(40) NOT NULL DEFAULT '', summary VARCHAR(200) NOT NULL DEFAULT '', description TEXT NOT NULL,
   image VARCHAR(255) NOT NULL DEFAULT '', tag VARCHAR(40) NOT NULL DEFAULT '',
-  price INT NOT NULL, cost INT NOT NULL, wholesale_price INT NOT NULL DEFAULT 0, tax_rate INT NOT NULL DEFAULT 10, dealer_id VARCHAR(40) NOT NULL,
+  price INT NOT NULL, cost INT NOT NULL, wholesale_price INT NOT NULL DEFAULT 0, agency_price INT NOT NULL DEFAULT 0, tax_rate INT NOT NULL DEFAULT 10, dealer_id VARCHAR(40) NOT NULL,
   stock INT NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0, updated_at VARCHAR(30) NOT NULL,
   KEY products_dealer (dealer_id),
   CONSTRAINT products_price CHECK (price BETWEEN 1 AND 1000000), CONSTRAINT products_cost CHECK (cost >= 0), CONSTRAINT products_stock CHECK (stock >= 0),

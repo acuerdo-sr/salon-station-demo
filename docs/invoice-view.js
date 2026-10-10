@@ -1,5 +1,5 @@
 // 月次請求書の表示・CSV。適格請求書の記載事項（発行者名と登録番号、取引年月日、内容、税率ごとの合計と消費税額、宛名）を含める。
-import { esc, money, downloadCSV } from './ui-kit.js?v=037e68a257';
+import { esc, money, downloadCSV } from './ui-kit.js?v=52a35508c0';
 
 const day = value => String(value || '').slice(0, 10).replaceAll('-', '/');
 const monthLabel = month => { const [y, m] = String(month).split('-'); return `${y}年${Number(m)}月`; };

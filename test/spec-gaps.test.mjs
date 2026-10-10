@@ -143,15 +143,18 @@ for (const [name, create] of engines(now)) {
     assert.equal(styling.productCount, 0);
     await assert.rejects(e.call('/admin/categories', 'POST', { name: 'シャンプー' }, admin), /同じ名前/);
     await assert.rejects(e.call('/admin/categories', 'POST', { name: '新カテゴリ' }, salonOp), /権限/);
-    const input = { brand: 'SENA', name: 'ナチュラル ヘアワックス', categoryId: styling.id, concerns: ['ボリュームアップ'], size: '80 g', description: '軽い仕上がり。', tag: 'NEW', price: 2420, cost: 1400, wholesalePrice: 1573, dealerId: 'bicma', stock: 30, enabled: true, imageData: PNG };
+    const input = { brand: 'SENA', name: 'ナチュラル ヘアワックス', categoryId: styling.id, concerns: ['ボリュームアップ'], size: '80 g', description: '軽い仕上がり。', tag: 'NEW', price: 2420, wholesalePrice: 1573, dealerId: 'bicma', stock: 30, enabled: true, imageData: PNG };
     const p = await e.call('/admin/products', 'POST', input, admin);
     assert.deepEqual([p.sku, p.category, p.concerns, p.stock, p.dealerId, p.wholesalePrice], ['P-00001', 'スタイリング', ['ボリュームアップ'], 30, 'bicma', 1573], '商品コードは自動で付ける');
+    assert.deepEqual([p.cost, p.agencyPrice], [undefined, Math.round(2420 * 0.55)], '新しい商品の代理店価格は F.I.T が設定するまで売価の55%。仕入単価は藤井企画に返さない');
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, shipper)).products.find(x => x.id === p.id).cost, Math.round(2420 * 0.5), '仕入単価は F.I.T が設定するまで売価の50%（仮）');
     assert.ok(e.sql ? /^uploads\/products\/test-1\.png$/.test(p.image) : p.image.startsWith('data:image/png;base64,'));
     assert.equal((await e.call('/admin/products', 'POST', { ...input, sku: 'MY-CODE' }, admin)).sku, 'P-00002', '入力した商品コードは使わない');
     await assert.rejects(e.call('/admin/products', 'POST', input, shipper), /権限/);
     await assert.rejects(e.call('/admin/products', 'POST', { ...input, imageData: 'data:image/png;base64,' + btoa('this is not a png') }, admin), /画像の形式/);
     await assert.rejects(e.call('/admin/products', 'POST', { ...input, concerns: ['寝ぐせ'] }, admin), /お悩み/);
-    await assert.rejects(e.call('/admin/products', 'POST', { ...input, cost: 9999 }, admin), /仕入単価は売価以下/);
+    await assert.rejects(e.call('/admin/products', 'POST', { ...input, cost: 1000 }, admin), /F.I.Tソリューション が設定/);
+    await assert.rejects(e.call('/admin/products', 'POST', { ...input, wholesalePrice: 9999 }, admin), /卸価格は売価以下/);
     // 会員のストアに、カテゴリと一緒に出る
     const member = await e.member('kojin-taro');
     const boot = await e.call('/bootstrap', 'GET', undefined, member);
@@ -160,7 +163,7 @@ for (const [name, create] of engines(now)) {
     // 本部は全項目を編集、ディーラーは在庫だけ
     const edited = await e.call(`/admin/products/${p.id}`, 'PATCH', { sku: 'CHANGED', name: 'ナチュラル ヘアワックス（ソフト）', concerns: [], price: 2640, stock: 25 }, admin);
     assert.deepEqual([edited.sku, edited.name, edited.concerns, edited.price, edited.stock, edited.category], ['P-00001', 'ナチュラル ヘアワックス（ソフト）', [], 2640, 25, 'スタイリング']);
-    await assert.rejects(e.call(`/admin/products/${p.id}`, 'PATCH', { name: 'x' }, shipper), /在庫数のみ/);
+    await assert.rejects(e.call(`/admin/products/${p.id}`, 'PATCH', { name: 'x' }, shipper), /在庫数・仕入単価・代理店価格/);
     assert.equal((await e.call(`/admin/products/${p.id}`, 'PATCH', { stock: 40 }, shipper)).stock, 40);
     // カテゴリの名前を変えると商品の表示も変わる。商品があるカテゴリは削除できない
     cats = await e.call(`/admin/categories/${styling.id}`, 'PATCH', { name: 'スタイリング剤', sortOrder: 0 }, admin);

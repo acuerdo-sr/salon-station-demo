@@ -30,7 +30,9 @@ for (const [name, create] of engines) {
     assert.equal(boot.products.length, catalogProducts.length); assert.equal(boot.products[0].cost, undefined);
     assert.deepEqual(boot.products.find(p => p.id === 'shampoo-moist').concerns, ['ダメージヘア対策', 'カラーケア']);
     assert.equal(boot.salons.find(s => s.id === 'lumiere').staff.map(s => s.name).join(), 'HARUKA,YUI');
-    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === 'shampoo-moist').cost, 1430);
+    const forFujii = (await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === 'shampoo-moist');
+    assert.deepEqual([forFujii.cost, forFujii.agencyPrice], [undefined, 1573], '藤井企画には仕入原価を見せない（代理店価格は見える）');
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, shipper)).products.find(p => p.id === 'shampoo-moist').cost, 1430, '仕入原価は F.I.T だけ');
     await assert.rejects(e.call('/quote', 'POST', { salonId: 'lumiere', items: [line('shampoo-moist', 1, 2860)] }, {}), /ログイン/);
   });
 
@@ -67,7 +69,8 @@ for (const [name, create] of engines) {
     // ディーラーは BICMA だけなので、1つの注文の出荷指示は1件（仕入値の合計＋送料）
     assert.equal(pos.length, 1); assert.equal(snap.orders.find(x => x.id === o.id).fee, 836, 'ECの紹介料率（デモ10%）');
     const [po] = pos;
-    assert.equal(po.dealerId, 'bicma'); assert.equal(po.total, 1430 * 2 + 1320 + 660);
+    assert.equal(po.dealerId, 'bicma'); assert.equal(po.total, undefined, '藤井企画には出荷指示の仕入金額を見せない');
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, shipper)).purchaseOrders.find(p => p.id === po.id).total, 1430 * 2 + 1320 + 660);
     const move = async (actor, status, effects = []) => { await e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'DEMO-1' }, actor, now, effects); return effects; };
     await assert.rejects(move(shipper, 'shipped'), /順に/);
     await move(shipper, 'accepted');
@@ -130,7 +133,7 @@ for (const [name, create] of engines) {
     assert.equal(d.orders.length, 0); assert.equal(d.profiles.length, 0); assert.deepEqual(d.events, []);
     assert.ok(d.purchaseOrders.length > 0 && d.purchaseOrders.every(p => p.dealerId === 'bicma'));
     assert.ok(d.products.every(p => p.dealerId === 'bicma')); assert.deepEqual(d.dealers.map(x => x.id), ['bicma']);
-    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5, price: 1 }, shipper), /在庫数のみ/);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5, price: 1 }, shipper), /在庫数・仕入単価・代理店価格/);
     assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5 }, shipper)).stock, 5);
     await assert.rejects(e.call('/admin/products/oil-smooth', 'PATCH', { stock: 5 }, { operator: { role: 'dealer', dealerId: 'other', name: 'x' } }), /他社/);
     await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5, price: 1, cost: 1, enabled: true }, salonOp), /権限/);
@@ -138,6 +141,30 @@ for (const [name, create] of engines) {
     assert.ok(s.orders.every(o => o.salonId === 'lumiere')); assert.ok(s.profiles.every(p => p.salonId === 'lumiere')); assert.deepEqual(s.salons.map(x => x.id), ['lumiere']);
     assert.equal((await e.call('/admin/snapshot', 'GET', undefined, { operator: { role: 'salon', salonId: 'atelier', name: 'x' } })).orders.filter(o => o.memberId === 'a').length, 0);
     await assert.rejects(e.call('/admin/snapshot', 'GET', undefined, {}), /ログイン/);
+  });
+
+  run('prices: 藤井企画 sets selling and wholesale prices, F.I.T sets its cost and agency price; the cost and F.I.T profit reach F.I.T only', async e => {
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { cost: 1000 }, admin), /F.I.Tソリューション が設定/);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { price: 3000 }, shipper), /在庫数・仕入単価・代理店価格/);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { cost: 9999 }, shipper), /仕入単価は売価以下/);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { agencyPrice: 9999 }, shipper), /代理店価格.*売価以下/);
+    const stock = await stockOf(e, 'shampoo-moist'), set = await e.call('/admin/products/shampoo-moist', 'PATCH', { cost: 1400, agencyPrice: 1600 }, shipper);
+    assert.deepEqual([set.cost, set.agencyPrice, set.stock], [1400, 1600, stock], '在庫数はそのまま');
+    const edited = await e.call('/admin/products/shampoo-moist', 'PATCH', { stock, price: 2860, wholesalePrice: 1859, enabled: true }, admin);
+    assert.deepEqual([edited.cost, edited.agencyPrice], [undefined, 1600], '藤井企画が編集しても、仕入原価は返さず変えない');
+    const a = await linked(e, 'a'); await order(e, a, [line('shampoo-moist', 1, 2860)]);
+    const forFujii = await e.call('/admin/snapshot', 'GET', undefined, admin), forSalon = await e.call('/admin/snapshot', 'GET', undefined, salonOp), forFit = await e.call('/admin/snapshot', 'GET', undefined, shipper);
+    assert.equal(forFit.products.find(p => p.id === 'shampoo-moist').cost, 1400);
+    assert.ok(forFit.purchaseOrders.every(p => typeof p.total === 'number' && p.items.every(i => typeof i.cost === 'number')));
+    assert.equal(forFujii.products.find(p => p.id === 'shampoo-moist').agencyPrice, 1600);
+    assert.ok(forSalon.products.every(p => p.cost === undefined && p.agencyPrice === undefined), '加盟店には仕入原価も代理店価格も見せない');
+    for (const snap of [forFujii, forSalon]) {
+      assert.ok(snap.products.every(p => p.cost === undefined));
+      assert.ok(snap.orders.every(o => o.items.every(i => i.cost === undefined)));
+      assert.ok(snap.purchaseOrders.every(p => p.total === undefined && p.items.every(i => i.cost === undefined)));
+      assert.ok(snap.settlements.length && snap.settlements.every(s => s.purchase === undefined && s.dealerNet === undefined), 'F.I.T の利益も見せない');
+    }
+    assert.ok(forFujii.events.some(ev => ev.action === '商品・在庫を更新') && !forFujii.events.some(ev => ev.action.includes('1,400')), '操作履歴に仕入単価の金額を残さない');
   });
 
   run('sales report: period buckets in Japan time, cancelled orders excluded, salon scope', async e => {
@@ -196,7 +223,7 @@ for (const [name, create] of engines) {
   if (name !== 'browser') {
     run('database: concurrent orders for the last item sell it once; history tables record every change', async e => {
       const a = await linked(e, 'a'), b = await linked(e, 'b'), before = await stockOf(e, 'shampoo-moist');
-      await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 1, price: 2860, cost: 1716, enabled: true }, admin);
+      await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 1, price: 2860, enabled: true }, admin);
       const results = await Promise.allSettled([order(e, a, [line('shampoo-moist', 1, 2860)]), order(e, b, [line('shampoo-moist', 1, 2860)])]);
       assert.deepEqual(results.map(r => r.status).sort(), ['fulfilled', 'rejected']);
       assert.equal(await stockOf(e, 'shampoo-moist'), 0);

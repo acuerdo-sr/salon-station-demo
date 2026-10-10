@@ -50,7 +50,7 @@ test('older browser data gains the new sample products and categories once, with
 
 test('the short description for product lists is optional and limited to 60 characters', () => {
   const ctx = { categories: [{ id: 'shampoo', name: 'シャンプー' }], dealers: [{ id: 'sena' }], concernNames: [] };
-  const base = { brand: 'B', name: 'N', categoryId: 'shampoo', dealerId: 'sena', price: 1000, cost: 500, wholesalePrice: 700, stock: 1, enabled: true };
+  const base = { brand: 'B', name: 'N', categoryId: 'shampoo', dealerId: 'sena', price: 1000, cost: 500, wholesalePrice: 700, agencyPrice: 600, stock: 1, enabled: true };
   assert.equal(productInput(base, ctx).summary, '');
   assert.equal(productInput({ ...base, summary: '  椿のオイルで、毛先までつややかに。 ' }, ctx).summary, '椿のオイルで、毛先までつややかに。');
   assert.throws(() => productInput({ ...base, summary: 'あ'.repeat(61) }, ctx), /一覧の説明/);

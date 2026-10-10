@@ -147,7 +147,7 @@ test('server: closed store, member sessions, origin checks, UTF-8 bodies, login 
     await t.test('product images are saved as files and served only from the upload folder; reset mail goes to the local outbox', async () => {
       const adminLogin = await call('/platform/operator/login', 'POST', { email: 'admin@example.test', password: 'Demo-Admin-2026' }), adminCookie = adminLogin.cookie.split(';')[0];
       const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-      const created = await call('/platform/admin/products', 'POST', { sku: 'SRV-IMG-01', brand: 'SENA', name: '画像つき商品', categoryId: 'shampoo', concerns: [], size: '', description: '', tag: '', price: 1000, cost: 500, wholesalePrice: 650, dealerId: 'bicma', stock: 1, enabled: true, imageData: png }, adminCookie);
+      const created = await call('/platform/admin/products', 'POST', { sku: 'SRV-IMG-01', brand: 'SENA', name: '画像つき商品', categoryId: 'shampoo', concerns: [], size: '', description: '', tag: '', price: 1000, wholesalePrice: 650, dealerId: 'bicma', stock: 1, enabled: true, imageData: png }, adminCookie);
       assert.equal(created.status, 200, JSON.stringify(created.body)); assert.match(created.body.image, /^uploads\/products\/[0-9a-f-]{36}\.png$/);
       const image = await fetch(base + '/' + created.body.image);
       assert.equal(image.status, 200); assert.equal(image.headers.get('content-type'), 'image/png');

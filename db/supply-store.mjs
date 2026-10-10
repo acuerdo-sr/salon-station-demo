@@ -1,7 +1,7 @@
 // DB版：加盟店からの仕入発注・定期発注・発注提案・月次請求。応答の形はブラウザ版（dist/supply-core.js）と同じ。
 import { fail, optional, requireOperator, jst, includedTax, requestKeyOf, validateTracking } from '../dist/platform-core.js';
 import {
-  supplyStatuses, SUPPLY_TRANSITIONS, supplyIntervals, ISSUER, issuerFor, BILLERS, agencyPriceOf, supplyBillerFor, billerOfRole, invoiceReader, supplyOrderId, subscriptionId, invoiceId, invoiceDueOn, salonAddress,
+  supplyStatuses, SUPPLY_TRANSITIONS, supplyIntervals, ISSUER, issuerFor, BILLERS, agencyOf, supplyBillerFor, billerOfRole, invoiceReader, supplyOrderId, subscriptionId, invoiceId, invoiceDueOn, salonAddress,
   nextRunOn, addDays, supplyLines, supplyTotals, supplySource, subscriptionInput, closableMonth, supplySuggestions, ecSummary, monthBefore, supplyFavoritesInput,
 } from '../dist/supply-core.js';
 
@@ -40,7 +40,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     const salon = await q.get('SELECT * FROM salons WHERE id=?', [salonId]) || fail('サロンが見つかりません。', 404);
     const products = await supplyProducts(q), items = lines(products), month = jst(now).slice(0, 7);
     const biller = supplyBillerFor({ supplyBiller: salon.supply_biller }, (await q.all('SELECT status, biller FROM supply_orders WHERE salon_id=? AND billing_month=?', [salonId, month])));
-    const agencyTotal = biller === 'fujii' ? items.reduce((s, l) => s + agencyPriceOf(products.find(p => p.id === l.id).price) * l.quantity, 0) : 0;
+    const agencyTotal = biller === 'fujii' ? items.reduce((s, l) => s + agencyOf(products.find(p => p.id === l.id)) * l.quantity, 0) : 0;
     let id = supplyOrderId(now);
     while (await q.get('SELECT id FROM supply_orders WHERE id=?', [id])) id = supplyOrderId(now);
     for (const l of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
