@@ -456,7 +456,8 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     if (route === '/admin/snapshot' && method === 'GET') return snapshot(q, actor, now);
     const poAction = route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
     if (poAction && method === 'PATCH') {
-      const op = requireOperator(actor, ['admin', 'dealer']);
+      // 注文の確認・出荷は、すべてディーラー（F.I.Tソリューション）が行う。管理会社（藤井企画）は状況を見るだけ
+      const op = requireOperator(actor, ['dealer']);
       const po = await q.get('SELECT * FROM purchase_orders WHERE id=?', [poAction[1]]); if (!po) fail('発注が見つかりません。', 404);
       if (op.role === 'dealer' && po.dealer_id !== op.dealerId) fail('他社の発注は操作できません。', 403);
       const order = await q.get('SELECT * FROM orders WHERE id=?', [po.order_id]);
@@ -584,7 +585,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
         return { filename, columns: SHIPPING_COLUMNS, rows: rows.map(p => { const o = openRow(c, 'orders', p), salon = salons.find(s => s.id === p.salon_id);
           return shippingRow({ reference: p.id, to: { name: o.ship_name, postal: o.ship_postal, ...decodeAddress(o.ship_address), phone: o.ship_phone }, from: { name: salon.name, postal: '', address: salonAddress(salon), phone: salon.phone }, items: items.filter(i => i.purchase_order_id === p.id).map(i => ({ name: i.name, quantity: num(i.quantity) })), note: `注文 ${p.order_id}` }); }) };
       }
-      requireOperator(actor, ['admin']);
+      requireOperator(actor, ['dealer']);
       const found = await supply.loadOrders(q, `id IN (${marks(ids)})`, ids);
       if (found.length !== ids.length) fail('発注が見つかりません。', 404);
       const rows = ids.map(id => found.find(o => o.id === id));
@@ -845,7 +846,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     // 変更を伴う処理は1つのトランザクションで行い、確定した場合だけ effects（通知の種類）を返す
     async request(route, method, input, actor = {}, now = new Date().toISOString(), effects = []) {
       if (method === 'GET' || READ_ONLY.has(route)) return handle(db, route, method, input, actor, now, []);
-      if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin']); return this.runDueSubscriptions(now, effects); }
+      if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin', 'dealer']); return this.runDueSubscriptions(now, effects); }
       const run = async () => {
         const local = [];
         const result = await db.transaction(async tx => { const r = await handle(tx, route, method, input, actor, now, local); if (!quiet(route)) await tx.run("UPDATE counters SET value=value+1 WHERE name='revision'"); return r; });

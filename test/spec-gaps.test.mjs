@@ -10,7 +10,7 @@ import { SHIPPING_COLUMNS } from '../dist/shipping-csv.js';
 import { engines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z', later = minutes => new Date(Date.parse(now) + minutes * 60000).toISOString();
-const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
+const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, shipper = { operator: demoOperators[2] }, otherDealer = { operator: { id: 'dealer-x', role: 'dealer', dealerId: 'other', name: '別の出荷元' } };
 const atelierOp = { operator: { id: 'salon-atelier', role: 'salon', salonId: 'atelier', name: 'atelier 凪 店舗担当' } };
 const home = { name: '自宅 太郎', postal: '1234567', prefecture: '東京都', city: '秘密市', street: '9-8-7', building: 'サンプルマンション101号室', phone: '090-1234-5678' };
 home.address = formatAddress(home);
@@ -113,7 +113,7 @@ for (const [name, create] of engines(now)) {
     const taro = await linked(e, 'kojin-taro');
     const paid = await order(e, taro);
     const po = paid.shipments[0].id;
-    const csv = await e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, { ...sena, ip: '192.0.2.8' });
+    const csv = await e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, { ...shipper, ip: '192.0.2.8' });
     assert.deepEqual(csv.columns, SHIPPING_COLUMNS); assert.match(csv.filename, /^出荷指示_EC注文_20261006\.csv$/);
     const row = Object.fromEntries(csv.columns.map((c, i) => [c, csv.rows[0][i]]));
     assert.equal(row['お客様管理番号'], po); assert.equal(row['お届け先電話番号'], '09012345678'); assert.equal(row['お届け先郵便番号'], '1234567');
@@ -122,17 +122,18 @@ for (const [name, create] of engines(now)) {
     assert.ok(!csv.columns.includes('代引金額'), 'カード決済のみなので代引きの列はない'); assert.equal(row['便種'], '飛脚宅配便'); assert.equal(row['記事'], `注文 ${paid.id}`);
     const logs = (await e.call('/admin/snapshot', 'GET', undefined, salonOp, later(1))).accessLogs;
     assert.ok(logs.some(l => l.role === 'ディーラー' && l.action === 'CSV出力' && l.target === '出荷指示（お名前・住所・電話番号）' && l.count === 1));
-    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, botanica), /出力できない/);
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, otherDealer), /出力できない/);
     await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, admin), /権限/);
-    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [] }, sena), /選んでください/);
-    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'accepted' }, sena);
-    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'shipped', carrier: '佐川急便', tracking: 'SG-2' }, sena);
-    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, sena), /出荷前/);
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [] }, shipper), /選んでください/);
+    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'accepted' }, shipper);
+    await e.call(`/admin/purchase-orders/${po}`, 'PATCH', { status: 'shipped', carrier: '佐川急便', tracking: 'SG-2' }, shipper);
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'purchaseOrders', ids: [po] }, shipper), /出荷前/);
     // 本部：加盟店からの発注（お届け先は店舗）
     const supply = await e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'shampoo-moist', quantity: 2, price: 1859 }] }, salonOp);
-    const hq = await e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, admin);
+    await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, admin), /権限/, '加盟店の発注の出荷もディーラーが行う');
+    const hq = await e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, shipper);
     const s = Object.fromEntries(hq.columns.map((c, i) => [c, hq.rows[0][i]]));
-    assert.equal(s['お届け先名称1'], 'LUMIÈRE 表参道'); assert.equal(s['お届け先電話番号'], '03-0000-0000'); assert.equal(s['ご依頼主名称1'], 'SALON STATION 本部（架空）'); assert.equal(s['品名1'], 'モイストリペア シャンプー ×2');
+    assert.equal(s['お届け先名称1'], 'LUMIÈRE 表参道'); assert.equal(s['お届け先電話番号'], '03-0000-0000'); assert.equal(s['ご依頼主名称1'], 'F.I.Tソリューション（BICMA）'); assert.equal(s['品名1'], 'モイストリペア シャンプー ×2');
     await assert.rejects(e.call('/admin/shipping-csv', 'POST', { kind: 'supplyOrders', ids: [supply.id] }, salonOp), /権限/);
   });
 
@@ -142,12 +143,12 @@ for (const [name, create] of engines(now)) {
     assert.equal(styling.productCount, 0);
     await assert.rejects(e.call('/admin/categories', 'POST', { name: 'シャンプー' }, admin), /同じ名前/);
     await assert.rejects(e.call('/admin/categories', 'POST', { name: '新カテゴリ' }, salonOp), /権限/);
-    const input = { brand: 'SENA', name: 'ナチュラル ヘアワックス', categoryId: styling.id, concerns: ['ボリュームアップ'], size: '80 g', description: '軽い仕上がり。', tag: 'NEW', price: 2420, cost: 1400, wholesalePrice: 1573, dealerId: 'sena', stock: 30, enabled: true, imageData: PNG };
+    const input = { brand: 'SENA', name: 'ナチュラル ヘアワックス', categoryId: styling.id, concerns: ['ボリュームアップ'], size: '80 g', description: '軽い仕上がり。', tag: 'NEW', price: 2420, cost: 1400, wholesalePrice: 1573, dealerId: 'bicma', stock: 30, enabled: true, imageData: PNG };
     const p = await e.call('/admin/products', 'POST', input, admin);
-    assert.deepEqual([p.sku, p.category, p.concerns, p.stock, p.dealerId, p.wholesalePrice], ['P-00001', 'スタイリング', ['ボリュームアップ'], 30, 'sena', 1573], '商品コードは自動で付ける');
+    assert.deepEqual([p.sku, p.category, p.concerns, p.stock, p.dealerId, p.wholesalePrice], ['P-00001', 'スタイリング', ['ボリュームアップ'], 30, 'bicma', 1573], '商品コードは自動で付ける');
     assert.ok(e.sql ? /^uploads\/products\/test-1\.png$/.test(p.image) : p.image.startsWith('data:image/png;base64,'));
     assert.equal((await e.call('/admin/products', 'POST', { ...input, sku: 'MY-CODE' }, admin)).sku, 'P-00002', '入力した商品コードは使わない');
-    await assert.rejects(e.call('/admin/products', 'POST', input, sena), /権限/);
+    await assert.rejects(e.call('/admin/products', 'POST', input, shipper), /権限/);
     await assert.rejects(e.call('/admin/products', 'POST', { ...input, imageData: 'data:image/png;base64,' + btoa('this is not a png') }, admin), /画像の形式/);
     await assert.rejects(e.call('/admin/products', 'POST', { ...input, concerns: ['寝ぐせ'] }, admin), /お悩み/);
     await assert.rejects(e.call('/admin/products', 'POST', { ...input, cost: 9999 }, admin), /仕入単価は売価以下/);
@@ -159,8 +160,8 @@ for (const [name, create] of engines(now)) {
     // 本部は全項目を編集、ディーラーは在庫だけ
     const edited = await e.call(`/admin/products/${p.id}`, 'PATCH', { sku: 'CHANGED', name: 'ナチュラル ヘアワックス（ソフト）', concerns: [], price: 2640, stock: 25 }, admin);
     assert.deepEqual([edited.sku, edited.name, edited.concerns, edited.price, edited.stock, edited.category], ['P-00001', 'ナチュラル ヘアワックス（ソフト）', [], 2640, 25, 'スタイリング']);
-    await assert.rejects(e.call(`/admin/products/${p.id}`, 'PATCH', { name: 'x' }, sena), /在庫数のみ/);
-    assert.equal((await e.call(`/admin/products/${p.id}`, 'PATCH', { stock: 40 }, sena)).stock, 40);
+    await assert.rejects(e.call(`/admin/products/${p.id}`, 'PATCH', { name: 'x' }, shipper), /在庫数のみ/);
+    assert.equal((await e.call(`/admin/products/${p.id}`, 'PATCH', { stock: 40 }, shipper)).stock, 40);
     // カテゴリの名前を変えると商品の表示も変わる。商品があるカテゴリは削除できない
     cats = await e.call(`/admin/categories/${styling.id}`, 'PATCH', { name: 'スタイリング剤', sortOrder: 0 }, admin);
     assert.equal(cats[0].name, 'スタイリング剤'); assert.equal(cats[0].productCount, 2);

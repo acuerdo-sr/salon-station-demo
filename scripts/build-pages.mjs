@@ -24,7 +24,7 @@ for (const name of scripts) {
   if (name.endsWith('.js')) await writeFile(path.join(output, name), withVersion(await readFile(src, 'utf8')));
   else await copyFile(src, path.join(output, name));
 }
-for(const page of ['index.html','shop.html','admin.html','order.html']){
+for(const page of ['index.html','shop.html','admin.html','dealer.html','order.html']){
 let html = await readFile(path.join(root, 'dist', page==='index.html'?'shop.html':page), 'utf8');
 html = html.replace(/((?:src|href)=["'])(\.\/[\w.-]+\.(?:js|css))(["'])/g, `$1$2?v=${version}$3`);
 html = html.replace('<head>', '<head>\n <meta name="site-mode" content="github-pages">\n <meta http-equiv="Content-Security-Policy" content="default-src \'self\'; img-src \'self\' data:; script-src \'self\'; style-src \'self\'; connect-src \'self\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'">');
@@ -38,7 +38,7 @@ for (const dir of ['products', 'brands', 'features']) {
   for (const name of await readdir(path.join(root, 'dist', 'assets', dir))) if (name.endsWith('.webp')) await copyFile(path.join(root, 'dist', 'assets', dir, name), path.join(output, 'assets', dir, name));
 }
 for (const name of ['salon-film.mp4', 'outfit-latin-wght.woff2', 'OUTFIT-LICENSE.txt']) await copyFile(path.join(root, 'dist', 'assets', name), path.join(output, 'assets', name));
-const allowed = ['index.html','shop.html','admin.html','order.html',...scripts,'catalog.json','assets','.nojekyll'];
+const allowed = ['index.html','shop.html','admin.html','dealer.html','order.html',...scripts,'catalog.json','assets','.nojekyll'];
 const extra = (await readdir(output)).filter(name => !allowed.includes(name));
 if (extra.length) throw Error('Unexpected files in Pages output: ' + extra.join(', '));
 console.log(`GitHub Pages static demo built in docs/ (version ${version}). No database or logs are included.`);

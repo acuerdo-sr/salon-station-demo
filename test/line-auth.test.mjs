@@ -75,6 +75,7 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal((await call('/auth/profile','PATCH',{name:'メール会員 改','salon':'LUMIÈRE'},linked.cookie)).body.member.lineId,'U-link');
     // 紐付け後にLINE連携した会員も、管理画面では「連携済み」と表示される
     const admin=await call('/platform/operator/login','POST',{email:'admin@example.test',password:'Demo-Admin-2026'});
+    const dealerLogin=await call('/platform/operator/login','POST',{email:'dealer@example.test',password:'Demo-Admin-2026'}); // 出荷は F.I.Tソリューション
     const salonStaff=await call('/platform/operator/login','POST',{email:'salon@example.test',password:'Demo-Admin-2026'});
     assert.equal((await call('/platform/admin/snapshot','GET',undefined,salonStaff.cookie)).body.profiles.find(p=>p.id===mail.body.member.id).lineLinked,true);
     assert.ok((await call('/platform/admin/snapshot','GET',undefined,admin.cookie)).body.customerStats.find(s=>s.salonId==='lumiere').lineLinked>=1);
@@ -98,11 +99,11 @@ test('LINE login: OAuth callback, LIFF token, account linking and Messaging API 
     assert.equal(pushes[0].auth,'Bearer bot-token');assert.equal(pushes[0].body.to,'U-liff');assert.ok(pushes[0].body.messages[0].text.includes(order.body.id));
     assert.equal((await call('/platform/orders','POST',input,liff.cookie)).body.id,order.body.id);
     const po=(await call('/platform/admin/snapshot','GET',undefined,admin.cookie)).body.purchaseOrders.find(p=>p.orderId===order.body.id);
-    await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'accepted'},admin.cookie);
-    assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'LINE-123'},admin.cookie)).status,200);
+    await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'accepted'},dealerLogin.cookie);
+    assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'LINE-123'},dealerLogin.cookie)).status,200);
     await until(()=>pushes.length>=2);
     assert.equal(pushes[1].body.to,'U-liff');assert.ok(pushes[1].body.messages[0].text.includes('LINE-123'));
-    assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'LINE-123'},admin.cookie)).status,200);
+    assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'LINE-123'},dealerLogin.cookie)).status,200);
     // 未連携会員の注文は通知しない
     const plain=await call('/auth/register','POST',{name:'未連携 会員',kana:'ミレンケイ カイイン',salon:'LUMIÈRE',email:'plain@example.test',password:'Demo-Member-2026',agreePrivacy:true});
     await call('/platform/profile','PATCH',{salonId:'lumiere',staffId:''},plain.cookie);

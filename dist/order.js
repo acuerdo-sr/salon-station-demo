@@ -7,10 +7,17 @@ import { DEMO_OPERATOR_PASSWORD } from './platform-core.js';
 import { $, esc, money, date, icon, badge, toast, modal, closeModal, empty, formError, imageUrl, keepTabVisible } from './ui-kit.js';
 import { lineConfig, liffIdToken } from './line-login.js';
 import { invoiceHtml, downloadInvoiceCsv, invoiceStatusLabels } from './invoice-view.js';
+import qrcode from './qr-code.js';
+import { statuses } from './platform-core.js';
+import { genderNames } from './member-store.js';
+import { splitName, formatPhone } from './person.js';
 
 let operator = null, ws = null, staff = null, page = 'home', cart = {}, cartSource = 'manual', requestKey = null, busy = false, line = { enabled: false, orderLiffId: '' }, lineToken = null;
 let query = '', category = '', onlyFavorites = false, hideOut = false;
-const PAGES = [['home', 'ホーム'], ['products', '商品一覧'], ['history', '発注履歴'], ['subscriptions', '定期発注'], ['invoices', '請求書'], ['ec', '店販EC'], ['staff', 'スタッフ']];
+// お客様・店販EC・店舗：自店のお客様と注文（/admin/snapshot。開くとアクセス記録に残る）
+let snap = null, customerQuery = '';
+// 加盟店（美容室）の画面はここだけ：仕入れ（ホーム〜請求書）と、店販EC・お客様・店舗の運営
+const PAGES = [['home', 'ホーム'], ['products', '商品一覧'], ['history', '発注履歴'], ['subscriptions', '定期発注'], ['invoices', '請求書'], ['ec', '店販EC'], ['customers', 'お客様'], ['shop', '店舗・スタッフ']];
 const today = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const productOf = id => ws.products.find(p => p.id === id);
 const cartLines = () => Object.entries(cart).map(([id, quantity]) => ({ ...productOf(id), quantity })).filter(p => p.id);
@@ -66,7 +73,7 @@ function shell() {
       <div class="b2b-head-sub"><div class="b2b-cats">${cats.map(c => `<button data-category-jump="${esc(c)}">${esc(c)}</button>`).join('')}</div><form id="search-form" class="b2b-search" role="search"><input name="q" value="${esc(query)}" placeholder="品番・商品名で探す" aria-label="品番・商品名で探す" enterkeyhint="search">${icon('search')}</form></div></header>
     ${lineToken && !operator.lineLinked ? `<div class="notice order-banner">このLINEアカウントと連携すると、次回からLINEで開くだけでログインできます。<button class="btn line small" data-line-link>LINEと連携</button></div>` : ''}
     <nav class="b2b-tabs" aria-label="仕入れメニュー">${PAGES.map(([id, label]) => `<button class="${page === id ? 'active' : ''}" data-page="${id}">${label}</button>`).join('')}</nav>
-    <main class="b2b-main">${page === 'home' ? homePage() : page === 'products' ? productsPage() : page === 'ec' ? ecTab() : page === 'history' ? historyTab() : page === 'subscriptions' ? subscriptionsTab() : page === 'staff' ? staffTab() : invoicesTab()}</main>
+    <main class="b2b-main">${page === 'home' ? homePage() : page === 'products' ? productsPage() : page === 'ec' ? ecTab() : page === 'history' ? historyTab() : page === 'subscriptions' ? subscriptionsTab() : page === 'customers' ? customersTab() : page === 'shop' ? shopTab() : invoicesTab()}</main>
     ${t.count ? `<div class="order-cartbar"><div><small>${t.count}点${t.shipping ? ` / 送料 ${money(t.shipping)}` : ' / 送料無料'}・出荷予定 ${esc(shipEstimate(1).label)}</small><strong>${money(t.total)}</strong></div><button class="btn primary" data-review>発注内容を確認 ${icon('arrow')}</button></div>` : ''}`;
   keepTabVisible($('.b2b-tabs'), tabScroll);
 }
@@ -122,6 +129,12 @@ function ecGlance() {
   const e = ws.ec;
   return `<button class="ec-glance" data-page="ec" aria-label="店販ECの詳細を見る"><span><small>${monthLabel(e.month)}の店販EC</small><b>${money(e.current.sales)}</b></span><span><small>取り分（見込み）</small><b>${money(e.current.proceeds)}</b></span><span class="ec-change">${changeText(e)}${icon('chevron')}</span></button>`;
 }
+// 店販EC：貴店のお客様の注文。確認・出荷は F.I.Tソリューション が行い、ここでは状況を見る
+function ecOrders() {
+  const rows = (snap?.orders || []).slice(0, 30), share = id => snap.settlements?.find(s => s.orderId === id);
+  return `<section class="order-section"><h2>お客様のご注文</h2><p class="subtle-note">ご注文の確認・出荷は、ディーラーの F.I.Tソリューション が行います。最新30件を表示します。</p>
+    ${rows.length ? rows.map(o => `<article class="supply-order ec-order"><div class="between"><div><b>${esc(o.customer?.name || '')}</b><small>${esc(o.id)}・${date(o.createdAt, true)}・${o.items.length}商品${o.staffName && o.staffName !== '指名なし' ? `・担当 ${esc(o.staffName)}` : ''}</small></div><div class="num"><b>${money(o.subtotal)}</b><small>取り分 ${money(share(o.id)?.proceeds || 0)}</small>${badge(o.status, statuses[o.status])}</div></div></article>`).join('') : empty('ご注文はまだありません', '')}</section>`;
+}
 function ecTab() {
   const e = ws.ec, c = e.current, p = e.previous, prev = monthLabel(e.previousMonth);
   return `${secHead('Salon EC', '店販EC')}<p class="notice">貴店を選んでいるお客様が、ECで購入した分の集計です（${monthLabel(e.month)}1日〜今日。商品代・税込で、送料は含みません）。お客様のお名前は表示しません。お客様ごとの内訳は管理画面の「受注管理」で確認できます。</p>
@@ -133,19 +146,73 @@ function ecTab() {
     </section>
     <section class="order-section"><h2>よく売れている商品（${monthLabel(e.month)}）</h2><p class="subtle-note">店頭の在庫や、次の発注の目安にご利用ください。</p>
     ${e.topProducts.length ? e.topProducts.map((t, i) => { const product = productOf(t.productId); return `<article class="supply-order ec-rank"><span class="rank-num">${i + 1}</span><div><b>${esc(t.name)}</b><small>${t.quantity}点・${money(t.sales)}</small></div>${product && product.stock > (cart[product.id] || 0) ? `<button class="btn soft small" data-ec-add="${esc(product.id)}">発注に追加</button>` : ''}</article>`; }).join('') : empty('今月のEC注文はまだありません', 'QRコードや紹介リンクから、お客様にECをご案内ください。')}</section>
-    <p class="subtle-note">取り分は「商品売上 − 仕入原価 − 運用料（${ws.salon.feeRate}%）」の見込みです。本部からのお支払いや、請求書との相殺の方法は別途ご案内します。キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
+    ${ecOrders()}<p class="subtle-note">取り分は「商品売上 − 仕入原価 − 運用料（${ws.salon.feeRate}%）」の見込みです。お支払いや、請求書との相殺の方法は別途ご案内します。キャンセル・返品済みの注文は含みません。お客様の担当店舗が後から変わっても、売れたときの店舗の実績として数えます。</p>`;
 }
 // ---- 担当スタッフ：お客様が会員登録・マイページで選ぶスタッフの追加・名前の変更・並び替え・削除（管理画面の「担当スタッフ」と同じ操作）
 const staffUrl = (id = '') => `/admin/salons/${encodeURIComponent(operator.salonId)}/staff${id ? '/' + encodeURIComponent(id) : ''}`;
 async function loadStaff() { staff = await platform(staffUrl()); }
 const staffOf = id => staff.staff.find(s => s.id === id);
+// ---- お客様：貴店の QR コードから会員登録したお客様。担当スタッフはここで設定する（お客様は選ばない）
+const mySalon = () => snap?.salons.find(s => s.id === operator.salonId);
+const staffChoices = (list, selected = '') => '<option value="">未設定</option>' + list.map(s => `<option value="${esc(s.id)}" ${s.id === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+const customerOrders = id => snap.orders.filter(o => o.memberId === id);
+function customersTab() {
+  const staffList = mySalon()?.staff || [], q = customerQuery.toLowerCase();
+  const all = snap.profiles.filter(p => p.salonId === operator.salonId), rows = all.filter(p => `${p.name} ${p.kana || ''} ${p.ref} ${p.email}`.toLowerCase().includes(q));
+  return `${secHead('Customers', 'お客様')}<p class="notice">貴店の QR コードから会員登録したお客様です。お客様は担当スタッフを選びません。「担当スタッフ」を選ぶと、その場で保存します。お客様の情報を開いた記録は、下の「閲覧の記録」に残ります。</p>
+    <form id="customer-search" class="b2b-search customer-search" role="search"><input name="q" value="${esc(customerQuery)}" placeholder="お名前・フリガナ・会員番号で探す" aria-label="お客様を探す" enterkeyhint="search">${icon('search')}</form>
+    <p class="subtle-note">${rows.length}人${q ? `（全${all.length}人）` : ''} ／ 担当が未設定 ${rows.filter(p => !p.staffId).length}人</p>
+    ${rows.length ? rows.map(p => { const o = customerOrders(p.id); return `<article class="supply-order customer-row"><div class="customer-main"><button class="customer-name" data-customer="${esc(p.id)}">${esc(p.name)}${p.lineLinked ? '<span class="line-pill">LINE</span>' : ''}</button><small>${esc(p.kana || '')}　会員番号 ${esc(p.ref)}　${date(p.createdAt)} 登録・ご購入 ${o.length}回</small></div><label class="customer-staff">担当スタッフ<select data-member-staff="${esc(p.id)}" aria-label="${esc(p.name)}の担当スタッフ">${staffChoices(staffList, p.staffId)}</select></label></article>`; }).join('') : empty('お客様が見つかりません', q ? '検索の言葉を変えてお試しください。' : 'QR コードから会員登録すると、ここに表示されます。')}
+    ${accessSection()}`;
+}
+function accessSection() {
+  const rows = (snap.accessLogs || []).slice(0, 20);
+  return `<section class="order-section"><h2>閲覧の記録</h2><p class="subtle-note">貴店のお客様の情報を、だれが・いつ・何件開いたかの記録です（ディーラーの出荷担当・DB保守の分も含みます）。同じ画面の再読み込みは30分に1回だけ記録します。</p>
+    ${rows.length ? `<div class="access-list">${rows.map(r => `<article class="supply-order access-row"><div class="between"><div><b>${esc(r.actorName)}</b><small>${esc(r.role)}・${esc(r.action)}：${esc(r.target)}</small></div><small>${date(r.at, true)}　${r.count}件</small></div></article>`).join('')}</div>` : empty('記録はまだありません', '')}</section>`;
+}
+function customerDetail(id) {
+  const p = snap.profiles.find(x => x.id === id); if (!p) return;
+  const o = customerOrders(id), staffName = mySalon()?.staff.find(s => s.id === p.staffId)?.name;
+  modal('お客様の情報', `<h3>${esc(p.name)}${p.kana ? `<small class="subtle-note">　${esc(p.kana)}</small>` : ''}</h3><dl class="detail-list"><dt>会員番号</dt><dd>${esc(p.ref)}</dd><dt>メールアドレス</dt><dd>${esc(p.email)}</dd><dt>電話番号</dt><dd>${esc(formatPhone(p.phone) || '未登録')}</dd><dt>性別 / 生年月日</dt><dd>${esc(genderNames[p.gender || ''])} / ${esc(p.birthday || '未登録')}</dd><dt>担当スタッフ</dt><dd>${esc(staffName || '未設定')}</dd><dt>LINE連携</dt><dd>${p.lineLinked ? '連携済み' : '未連携'}</dd><dt>会員登録日</dt><dd>${date(p.createdAt, true)}</dd><dt>ご購入</dt><dd>${o.length}回・${money(o.filter(x => !['cancelled', 'returned'].includes(x.status)).reduce((s, x) => s + x.subtotal, 0))}（商品代）</dd></dl>
+    ${o.length ? `<div class="stack">${o.map(x => `<article class="supply-order"><div class="between"><div><b>${esc(x.id)}</b><small>${date(x.createdAt, true)}・${x.items.length}商品</small></div><div class="num"><b>${money(x.total)}</b>${badge(x.status, statuses[x.status])}</div></div></article>`).join('')}</div>` : '<p class="subtle-note">ご購入はまだありません。</p>'}
+    <div class="form-actions"><button class="btn outline" data-customer-edit="${esc(p.id)}">お客様の情報を編集</button></div>`, true);
+}
+function customerForm(id) {
+  const p = snap.profiles.find(x => x.id === id), n = splitName(p.name), k = splitName(p.kana || '');
+  modal('お客様の情報の編集', `<p class="subtle-note">会員番号 ${esc(p.ref)} / ${esc(p.email)}（メールアドレスはログインに使うため、ここでは変更できません）</p><form id="customer-form" data-member-id="${esc(p.id)}" class="stack"><div class="form-grid"><label>お名前（姓）<input name="lastName" value="${esc(n.last)}" maxlength="20" required></label><label>お名前（名）<input name="firstName" value="${esc(n.first)}" maxlength="20" required></label><label>フリガナ（セイ）<input name="lastKana" value="${esc(k.last)}" maxlength="20" required></label><label>フリガナ（メイ）<input name="firstKana" value="${esc(k.first)}" maxlength="20" required></label><label>電話番号（任意）<input name="phone" value="${esc(formatPhone(p.phone || ''))}" maxlength="13" inputmode="tel"></label><label>性別<select name="gender">${Object.entries(genderNames).map(([key, name]) => `<option value="${key}" ${String(p.gender ?? '') === key ? 'selected' : ''}>${name}</option>`).join('')}</select></label><label>生年月日<input name="birthday" type="date" value="${esc(p.birthday || '')}"></label></div><div id="form-error" class="error" role="alert"></div><button class="btn primary" type="submit">保存する</button></form>`);
+}
+// ---- 店舗・スタッフ：店舗情報、会員登録用の QR コード、担当スタッフ
+const shopUrl = () => { const url = new URL('./', location.href); url.searchParams.set('shop_id', operator.salonId); return url.href; };
+function shopTab() {
+  const s = mySalon(), qr = qrcode(0, 'M'); qr.addData(shopUrl()); qr.make();
+  const address = s ? [s.prefecture, s.city, s.street, s.building].filter(Boolean).join('') : '';
+  return `${secHead('Salon', '店舗・スタッフ')}
+    <section class="order-section shop-info"><div class="between"><h2 class="b2b-sub-head">店舗情報</h2><button class="btn outline small" data-shop-edit>編集する</button></div>
+      <dl class="detail-list"><dt>店舗名</dt><dd>${esc(s?.name || '')}</dd><dt>住所</dt><dd>${esc(address)}</dd><dt>電話番号</dt><dd>${esc(s?.phone || '')}</dd><dt>営業時間</dt><dd>${esc(s?.hours || '未登録')}</dd><dt>定休日</dt><dd>${esc(s?.holiday || '未登録')}</dd><dt>紹介文</dt><dd>${esc(s?.description || '未登録')}</dd></dl>
+      <p class="subtle-note">お客様のストアの「マイサロン」に表示されます。運用料率・販売事業者名の変更は、管理会社（藤井企画）にご依頼ください。</p></section>
+    <section class="order-section shop-qr"><h2 class="b2b-sub-head">会員登録用の QR コード</h2><p class="subtle-note">店頭に置いてお客様に読み取っていただくと、貴店のお客様として会員登録の画面が開きます。保存する QR は印刷用の PNG（600×600px）です。</p>
+      <div class="shop-qr-body"><img src="${qr.createDataURL(5, 20)}" alt="${esc(s?.name || '')}の会員登録用 QR コード" width="185" height="185"><div class="stack"><div class="copy-row"><input id="salon-url" value="${esc(shopUrl())}" readonly aria-label="会員登録用のリンク"><button class="btn primary" data-copy-url>リンクをコピー</button></div><div class="form-actions"><button class="btn outline" data-download-qr>QR を保存（PNG） ${icon('download')}</button><a class="btn outline" href="${esc(shopUrl())}" target="_blank" rel="noopener">ストアを開く ${icon('external')}</a></div></div></div></section>
+    ${staffTab()}`;
+}
+function shopForm() {
+  const s = mySalon(), v = k => esc(s?.[k] ?? '');
+  modal('店舗情報の編集', `<form id="shop-form" class="stack"><label>店舗名<input name="name" value="${v('name')}" maxlength="80" required></label><div class="form-grid"><label>都道府県<input name="prefecture" value="${v('prefecture')}" maxlength="10" required></label><label>市区町村<input name="city" value="${v('city')}" maxlength="50" required></label><label>番地<input name="street" value="${v('street')}" maxlength="100" required></label><label>建物名<input name="building" value="${v('building')}" maxlength="100"></label><label>電話番号<input name="phone" value="${v('phone')}" maxlength="15" pattern="[0-9\\-]+" inputmode="tel" required></label><label>営業時間<input name="hours" value="${v('hours')}" maxlength="50" placeholder="9:00〜18:00"></label><label>定休日<input name="holiday" value="${v('holiday')}" maxlength="50" placeholder="毎週月曜日"></label><label>エリア表示<input name="area" value="${v('area')}" maxlength="60" placeholder="TOKYO / OMOTESANDO"></label></div><label>紹介文<input name="description" value="${v('description')}" maxlength="120"></label><label>備考<textarea name="notes" maxlength="500" rows="2">${v('notes')}</textarea></label><div id="form-error" class="error" role="alert"></div><button class="btn primary" type="submit">保存する</button></form>`);
+}
+async function downloadQr() {
+  const qr = qrcode(0, 'M'); qr.addData(shopUrl()); qr.make();
+  const size = 600, count = qr.getModuleCount(), cell = Math.floor(size / (count + 8)), offset = Math.floor((size - cell * count) / 2), canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size); ctx.fillStyle = '#000000';
+  for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) ctx.fillRect(offset + c * cell, offset + r * cell, cell, cell);
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png')), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `qr-${operator.salonId}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 function staffTab() {
   const list = staff?.staff || [];
-  return `${secHead('Staff', '担当スタッフ')}<p class="notice">お客様の「担当スタッフ」です。お客様は選ばず、サロンの管理画面の「会員管理」で、お客様ごとに設定します（この並び順で選択肢に出ます）。名前を変えても、担当のお客様はそのまま引き継がれます。</p>
+  return `<h2 class="b2b-sub-head">担当スタッフ</h2><p class="notice">お客様の担当になるスタッフです。お客様ごとの担当は「お客様」タブで設定します（この並び順で選択肢に出ます）。名前を変えても、担当のお客様はそのまま引き継がれます。</p>
     <form id="staff-form" class="supply-order staff-add"><label>新しいスタッフの名前<input name="name" maxlength="40" required placeholder="例：HARUKA" autocomplete="off"></label><button class="btn primary" type="submit">追加する</button></form>
     ${list.length ? list.map((s, i) => `<article class="supply-order staff-row"><div class="between"><div><b>${esc(s.name)}</b><small>担当のお客様 ${s.members}人</small></div><div class="staff-order"><button class="icon-btn" data-staff-move="${esc(s.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="${esc(s.name)}を上へ">↑</button><button class="icon-btn" data-staff-move="${esc(s.id)}" data-dir="1" ${i === list.length - 1 ? 'disabled' : ''} aria-label="${esc(s.name)}を下へ">↓</button></div></div>
       <div class="form-actions"><button class="btn outline small" data-staff-rename="${esc(s.id)}">名前を変更</button><button class="btn outline small" data-staff-delete="${esc(s.id)}">削除</button></div></article>`).join('') : empty('スタッフが登録されていません', '上の欄から追加してください。')}
-    <p class="subtle-note">指名なしのお客様：${staff?.unassigned ?? 0}人。スタッフを削除しても、過去の注文には注文時の担当者名が残ります。</p>`;
+    <p class="subtle-note">担当が未設定のお客様：${staff?.unassigned ?? 0}人。スタッフを削除しても、過去の注文には注文時の担当者名が残ります。</p>`;
 }
 function historyTab() {
   const rows = [...ws.orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -174,7 +241,15 @@ function review() {
     <details class="subscribe-box"><summary>この内容を定期発注にする</summary><form id="subscription-form" class="stack"><div class="form-grid"><label>間隔<select name="interval">${Object.entries(supplyIntervals).map(([k, v]) => `<option value="${k}" ${k === 'biweekly' ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label>初回の発注日<input name="startOn" type="date" min="${today()}" value="${addDays(today(), 1)}" required></label></div><button class="btn outline full" type="submit">定期発注を登録する</button></form></details></div>`);
 }
 async function load() { ws = await platform('/supply'); ws.favorites ||= []; for (const id of Object.keys(cart)) if (!productOf(id)) delete cart[id]; }
-async function go(next) { page = next; if (page === 'staff') await loadStaff(); else if (page !== 'home' && page !== 'products') await load(); shell(); scrollTo({ top: 0 }); }
+async function loadSnap() { snap = await platform('/admin/snapshot'); }
+async function go(next) {
+  page = next === 'staff' ? 'shop' : next;
+  if (page === 'shop') await Promise.all([loadStaff(), loadSnap()]);
+  else if (page === 'customers') await loadSnap();
+  else if (page === 'ec') await Promise.all([load(), loadSnap()]);
+  else if (page !== 'home' && page !== 'products') await load();
+  shell(); scrollTo({ top: 0 });
+}
 async function start() {
   line = await lineConfig();
   let { operator: op } = await platform('/operator/me');
@@ -183,7 +258,7 @@ async function start() {
     if (lineToken && !op) { try { op = (await platform('/operator/line', 'POST', { idToken: lineToken })).operator; } catch (error) { return loginView(error.message); } }
   }
   if (!op) return loginView();
-  if (op.role !== 'salon') return loginView('この画面は加盟店（美容室）のアカウント専用です。本部・ディーラーは管理画面をご利用ください。');
+  if (op.role !== 'salon') { await platform('/operator/logout', 'POST', {}); return loginView(op.role === 'dealer' ? 'この画面は加盟店（美容室）専用です。ディーラー（F.I.Tソリューション）の方は dealer.html からログインしてください。' : 'この画面は加盟店（美容室）専用です。管理会社（藤井企画）の方は admin.html からログインしてください。'); }
   operator = op; await load(); shell();
 }
 
@@ -198,6 +273,11 @@ document.addEventListener('click', async e => {
     if (b.dataset.fav) { const id = b.dataset.fav, next = isFavorite(id) ? ws.favorites.filter(x => x !== id) : [...ws.favorites, id]; ws.favorites = (await platform('/supply/favorites', 'PUT', { ids: next })).ids; shell(); toast(isFavorite(id) ? '「いつもの商品」に登録しました。' : '「いつもの商品」から外しました。'); }
     if (b.dataset.add) { const p = productOf(b.dataset.add); addToCart(p, 1); shell(); toast(`${p.name}をカートに入れました。`); }
     if (b.dataset.staffMove) { await platform(staffUrl(b.dataset.staffMove), 'PATCH', { move: Number(b.dataset.dir) }); await loadStaff(); shell(); }
+    if (b.dataset.customer) customerDetail(b.dataset.customer);
+    if (b.dataset.customerEdit) customerForm(b.dataset.customerEdit);
+    if (b.hasAttribute('data-shop-edit')) shopForm();
+    if (b.hasAttribute('data-copy-url')) { await navigator.clipboard.writeText($('#salon-url').value).then(() => toast('会員登録用のリンクをコピーしました。'), () => { $('#salon-url').select(); toast('リンクを選択しました。コピーしてお使いください。'); }); }
+    if (b.hasAttribute('data-download-qr')) { await downloadQr(); toast('QR コード（PNG）を保存しました。'); }
     if (b.dataset.staffRename) { const s = staffOf(b.dataset.staffRename); modal('スタッフ名の変更', `<form id="staff-rename-form" data-staff-id="${esc(s.id)}" class="stack"><label>スタッフ名<input name="name" value="${esc(s.name)}" maxlength="40" required></label><p class="subtle-note">担当のお客様（${s.members}人）はそのまま引き継がれます。過去の注文の担当者名は変わりません。</p><div id="form-error" class="error" role="alert"></div><button class="btn primary" type="submit">変更する</button></form>`); }
     if (b.dataset.staffDelete) { const s = staffOf(b.dataset.staffDelete), others = staff.staff.filter(x => x.id !== s.id); modal('スタッフの削除', `<form id="staff-delete-form" data-staff-id="${esc(s.id)}" class="stack"><p>「${esc(s.name)}」を担当スタッフから削除します。会員管理の選択肢にも表示されなくなります。</p>${s.members ? `<label>担当のお客様 ${s.members}人の引き継ぎ先<select name="transferTo"><option value="">指名なし</option>${others.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label>` : '<p class="subtle-note">担当のお客様はいません。</p>'}<p class="subtle-note">過去の注文には、注文時の担当者名が残ります。担当は、管理画面の「会員管理」で設定し直せます。</p><div id="form-error" class="error" role="alert"></div><button class="btn danger" type="submit">削除する</button></form>`); }
     if (b.hasAttribute('data-line-demo')) { b.disabled = true; operator = (await platform('/operator/line-demo', 'POST', {})).operator; await load(); shell(); toast('LINEからログインしました（デモ）。'); }
@@ -215,12 +295,18 @@ document.addEventListener('click', async e => {
     if (b.dataset.invoiceCsv) downloadInvoiceCsv(JSON.parse($('#modal').dataset.invoice));
   } catch (error) { formError(error); b.disabled = false; }
 });
-document.addEventListener('change', e => {
+document.addEventListener('change', async e => {
+  if (e.target.dataset.memberStaff) {
+    const t = e.target; t.disabled = true;
+    try { const r = await platform(`/admin/members/${encodeURIComponent(t.dataset.memberStaff)}/staff`, 'PATCH', { staffId: t.value }); await loadSnap(); shell(); toast(r.staffName ? `担当を ${r.staffName} にしました。` : '担当を「未設定」にしました。'); }
+    catch (error) { toast(error.message); await loadSnap(); shell(); }
+    return;
+  }
   if (e.target.id === 'only-fav') { onlyFavorites = e.target.checked; shell(); }
   if (e.target.id === 'hide-out') { hideOut = e.target.checked; shell(); }
 });
 document.addEventListener('submit', async e => {
-  const form = e.target; if (!['login-form', 'supply-form', 'subscription-form', 'staff-form', 'staff-rename-form', 'staff-delete-form', 'search-form', 'quick-form'].includes(form.id)) return;
+  const form = e.target; if (!['login-form', 'supply-form', 'subscription-form', 'staff-form', 'staff-rename-form', 'staff-delete-form', 'search-form', 'quick-form', 'customer-search', 'customer-form', 'shop-form'].includes(form.id)) return;
   e.preventDefault(); const b = form.querySelector('[type=submit]'); if (b) b.disabled = true; const f = Object.fromEntries(new FormData(form));
   try {
     if (form.id === 'search-form') { query = String(f.q || '').trim(); category = ''; await go('products'); return; }
@@ -233,7 +319,10 @@ document.addEventListener('submit', async e => {
     if (form.id === 'login-form') { const { operator: op } = await platform('/operator/login', 'POST', f); if (op.role !== 'salon') { await platform('/operator/logout', 'POST', {}); throw Error('この画面は加盟店（美容室）のアカウント専用です。'); } operator = op; page = 'home'; await load(); shell(); return; }
     if (form.id === 'staff-form') { await platform(staffUrl(), 'POST', { name: f.name }); await loadStaff(); shell(); toast(`${f.name.trim()} を追加しました。会員管理で、お客様の担当に設定できます。`); return; }
     if (form.id === 'staff-rename-form') { await platform(staffUrl(form.dataset.staffId), 'PATCH', { name: f.name }); await loadStaff(); closeModal(); shell(); toast('スタッフ名を変更しました。'); return; }
-    if (form.id === 'staff-delete-form') { await platform(staffUrl(form.dataset.staffId), 'DELETE', { transferTo: f.transferTo || '' }); await loadStaff(); closeModal(); shell(); toast('スタッフを削除しました。'); return; }
+    if (form.id === 'staff-delete-form') { await platform(staffUrl(form.dataset.staffId), 'DELETE', { transferTo: f.transferTo || '' }); await Promise.all([loadStaff(), loadSnap()]); closeModal(); shell(); toast('スタッフを削除しました。'); return; }
+    if (form.id === 'customer-search') { customerQuery = (f.q || '').trim(); shell(); $('#customer-search input')?.focus(); return; }
+    if (form.id === 'customer-form') { await platform('/admin/customers/' + encodeURIComponent(form.dataset.memberId), 'PATCH', { name: `${f.lastName.trim()} ${f.firstName.trim()}`, kana: `${f.lastKana.trim()} ${f.firstKana.trim()}`, phone: f.phone, gender: f.gender, birthday: f.birthday }); await loadSnap(); closeModal(); shell(); toast('お客様の情報を保存しました。'); return; }
+    if (form.id === 'shop-form') { await platform('/admin/salons/' + encodeURIComponent(operator.salonId), 'PATCH', f); await Promise.all([loadSnap(), load()]); closeModal(); shell(); toast('店舗情報を保存しました。'); return; }
     const items = cartLines().map(p => ({ id: p.id, quantity: p.quantity, price: p.wholesalePrice }));
     if (form.id === 'supply-form') {
       if (busy) return; busy = true;

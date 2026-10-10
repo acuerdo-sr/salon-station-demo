@@ -125,7 +125,7 @@
     "summary": "ブリーチを重ねたハイダメージ毛に。濃密に補修し、しっとりまとまる。ヘアマスク",
     "description": "ハイダメージ毛の集中ケアをイメージしたヘアマスク。週1〜2回のスペシャルケア向けのデモ商品です。",
     "sku": "SN-MK-020",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "sena-milk-heat",
@@ -144,7 +144,7 @@
     "summary": "ドライヤーやアイロンの前に。熱から髪を守り、なめらかに。洗い流さないヘアミルク",
     "description": "ドライヤー前に使う洗い流さないトリートメントをイメージしたデモ商品です。",
     "sku": "SN-ML-012",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "botanical-mist",
@@ -162,7 +162,7 @@
     "summary": "朝の寝ぐせ直しに。ひと吹きでまとまり、植物がやさしく香る。ヘアミスト",
     "description": "朝の寝ぐせ直しと、ほのかな香りをテーマにしたヘアミストのデモ商品です。",
     "sku": "SB-MS-015",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "botanical-scalp-shampoo",
@@ -181,7 +181,7 @@
     "summary": "頭皮のべたつき・においが気になる方に。すっきり軽やか。スカルプシャンプー",
     "description": "植物由来の成分をイメージした、頭皮をすっきり洗うシャンプーのデモ商品です。",
     "sku": "SB-SH-040",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "mizuha-shampoo",
@@ -200,7 +200,7 @@
     "summary": "乾燥でごわつく髪に。和の植物のうるおいで、やわらかな洗い上がり。シャンプー",
     "description": "和の植物をテーマにした、しっとり洗い上げるシャンプーのデモ商品です。",
     "sku": "MZ-SH-040",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "mizuha-treatment",
@@ -219,7 +219,7 @@
     "summary": "うねり・広がりが気になる髪に。しなやかに、まとまる髪へ。トリートメント",
     "description": "シャンプーと同じシリーズの、まとまりを出すトリートメントのデモ商品です。",
     "sku": "MZ-TR-040",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "mizuha-camellia-oil",
@@ -238,7 +238,7 @@
     "summary": "湿気で広がりやすい日に。毛先まで椿のつや。洗い流さないヘアオイル",
     "description": "椿をテーマにした、毛先までつややかに仕上げるヘアオイルのデモ商品です。",
     "sku": "MZ-OL-008",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "mizuha-mask",
@@ -257,7 +257,7 @@
     "summary": "年齢とともに細くなる髪に。ハリ・コシのある手ざわりへ。濃密ヘアマスク",
     "description": "年齢とともに気になる髪のハリ・コシをテーマにしたヘアマスクのデモ商品です。",
     "sku": "MZ-MK-018",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "calme-scalp-shampoo",
@@ -276,7 +276,7 @@
     "summary": "皮脂やにおいが気になる頭皮に。すっきり洗い上げる。スカルプシャンプー",
     "description": "頭皮の皮脂やにおいをすっきり洗うことをテーマにしたシャンプーのデモ商品です。",
     "sku": "CS-SH-030",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "calme-scalp-serum",
@@ -295,7 +295,7 @@
     "summary": "お風呂上がりの頭皮に。すっとなじみ、乾燥を防ぐ。頭皮用美容液",
     "description": "お風呂上がりの頭皮に使う美容液をイメージしたデモ商品です。",
     "sku": "CS-SR-006",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "calme-scalp-gel",
@@ -313,7 +313,7 @@
     "summary": "シャンプー前の2分で。毛穴の汚れを浮かせて落とす。頭皮クレンジングジェル",
     "description": "シャンプー前に使う頭皮用のクレンジングをイメージしたデモ商品です。",
     "sku": "CS-GL-015",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "calme-scalp-mist",
@@ -332,7 +332,7 @@
     "summary": "汗ばむ季節や運動のあとに。ひんやり爽快、頭皮すっきり。スカルプミスト",
     "description": "汗ばむ季節の頭皮をすっきり整えるミストをイメージしたデモ商品です。",
     "sku": "CS-MS-012",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "noir-wax-soft",
@@ -350,7 +350,7 @@
     "summary": "パーマやくせ毛を生かしたい方に。やわらかな束感をつくる。ソフトワックス",
     "description": "やわらかな束感と、パーマのカールを生かす仕上げをイメージしたワックスのデモ商品です。",
     "sku": "NA-WX-080S",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "noir-wax-hard",
@@ -366,7 +366,7 @@
     "summary": "ショートヘアをしっかり立ち上げ、夕方まで崩れにくい。ハードワックス",
     "description": "短めの髪をしっかり立ち上げる仕上げをイメージしたワックスのデモ商品です。",
     "sku": "NA-WX-080H",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "noir-balm",
@@ -384,7 +384,7 @@
     "summary": "髪にも手肌にも使える。濡れたようなつやとまとまり。スタイリングバーム",
     "description": "髪にも手肌にも使えるバームをイメージしたデモ商品です。",
     "sku": "NA-BM-040",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "noir-spray",
@@ -400,7 +400,7 @@
     "summary": "仕上げた形を一日キープ。べたつかず、自然な仕上がり。ヘアスプレー",
     "description": "仕上げた形を一日キープすることをテーマにしたスプレーのデモ商品です。",
     "sku": "NA-SP-180",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "noir-styling-oil",
@@ -418,7 +418,7 @@
     "summary": "ウェットな質感をつくりたい日に。つやと束感を同時に。スタイリングオイル",
     "description": "濡れたようなつやと束感をつくるスタイリングオイルのデモ商品です。",
     "sku": "NA-OL-100",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "haru-shampoo",
@@ -437,7 +437,7 @@
     "summary": "頭皮へのやさしさを大切にしたい方に。やわらかな泡と植物の香り。シャンプー",
     "description": "やさしい洗い心地と、植物の香りをテーマにしたシャンプーのデモ商品です。",
     "sku": "HO-SH-030",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "haru-treatment",
@@ -455,7 +455,7 @@
     "summary": "重くなりたくない方に。軽やかで、指通りなめらか。トリートメント",
     "description": "シャンプーと同じシリーズの、軽やかに仕上げるトリートメントのデモ商品です。",
     "sku": "HO-TR-025",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "haru-milk",
@@ -473,7 +473,7 @@
     "summary": "乾燥しがちな毛先に。軽いつけ心地で、やさしくまとまる。洗い流さないヘアミルク",
     "description": "毛先の乾燥をやさしく整えるヘアミルクのデモ商品です。入荷待ちの表示を確かめるため、初期在庫は0です。",
     "sku": "HO-ML-010",
-    "dealerId": "botanica"
+    "dealerId": "bicma"
   },
   {
     "id": "irodori-shampoo-purple",
@@ -492,7 +492,7 @@
     "summary": "ブリーチ後の黄ばみが気になる髪に。透明感のある髪色へ。紫のカラーシャンプー",
     "description": "ブリーチ後の黄ばみを抑えることをテーマにした、紫のカラーシャンプーのデモ商品です。",
     "sku": "IC-SH-025P",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "irodori-shampoo-pink",
@@ -510,7 +510,7 @@
     "summary": "ピンク・レッド系のカラーに。色落ちを抑えて長く楽しむ。カラーシャンプー",
     "description": "ピンク系のヘアカラーを長く楽しむことをテーマにしたカラーシャンプーのデモ商品です。",
     "sku": "IC-SH-025K",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "irodori-mask",
@@ -529,7 +529,7 @@
     "summary": "カラー直後の髪に。色もちと手ざわりを、しっとり守る。カラーケアマスク",
     "description": "カラー後の髪の色もちと手ざわりをテーマにしたヘアマスクのデモ商品です。",
     "sku": "IC-MK-020",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   },
   {
     "id": "irodori-mist",
@@ -547,6 +547,6 @@
     "summary": "外出前のひと吹きで。紫外線やドライヤーの熱から髪色を守る。ヘアミスト",
     "description": "紫外線やドライヤーの熱から髪色を守ることをテーマにしたミストのデモ商品です。",
     "sku": "IC-MS-012",
-    "dealerId": "sena"
+    "dealerId": "bicma"
   }
 ]

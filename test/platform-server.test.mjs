@@ -27,7 +27,7 @@ test('HTTP: operator session, role isolation, atomic oversell protection and res
   assert.equal((await call('/platform/admin/products/shampoo-moist','PATCH',{stock:5,price:1,cost:1,enabled:true},mc)).status,401);
   assert.equal((await call('/platform/admin/products/shampoo-moist','PATCH',{stock:5,price:1,cost:1,enabled:true},ac,'https://evil.test')).status,403);
   const d=await call('/platform/operator/login','POST',{email:'dealer@example.test',password:'Demo-Admin-2026'}),dc=d.cookie;
-  const snapshot=(await call('/platform/admin/snapshot','GET',undefined,dc)).body;assert.equal(snapshot.orders.length,0);assert.ok(snapshot.purchaseOrders.every(p=>p.dealerId==='sena'));
+  const snapshot=(await call('/platform/admin/snapshot','GET',undefined,dc)).body;assert.equal(snapshot.orders.length,0);assert.ok(snapshot.purchaseOrders.every(p=>p.dealerId==='bicma'));
   const po=snapshot.purchaseOrders.find(p=>p.orderId===saved.id);assert.ok(po);
   assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'accepted'},dc)).status,200);
   assert.equal((await call('/platform/admin/purchase-orders/'+po.id,'PATCH',{status:'shipped',carrier:'デモ配送',tracking:'DEMO-987654'},dc)).status,200);

@@ -21,7 +21,7 @@ import { createAuth } from '../auth.mjs';
 import { engines, linkMember } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z', later = minutes => new Date(Date.parse(now) + minutes * 60000).toISOString();
-const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
+const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, shipper = { operator: demoOperators[2] };
 const secret = { name: '個人 太郎', postal: '1234567', prefecture: '東京都', city: '秘密市', street: '9-8-7', building: '秘密ハイツ101', phone: '09012345678' };
 secret.address = formatAddress(secret);
 const pick = row => ({ actorName: row.actorName, role: row.role, salonId: row.salonId, action: row.action, target: row.target, count: row.count, channel: row.channel });
@@ -79,20 +79,20 @@ for (const [name, create] of engines(now)) {
     const grown = await e.call('/admin/snapshot', 'GET', undefined, salonOp, later(45));
     assert.deepEqual(grown.accessLogs.map(r => r.count), [5, 4, 4]);
     // ディーラー：発送先を受け取った店舗ごとに、お客様の人数を記録する
-    const d = await e.call('/admin/snapshot', 'GET', undefined, { ...sena, ip: '192.0.2.44' }, later(50));
+    const d = await e.call('/admin/snapshot', 'GET', undefined, { ...shipper, ip: '192.0.2.44' }, later(50));
     const refs = new Map((await e.call('/admin/snapshot', 'GET', undefined, admin)).orders.map(o => [o.id, o.customerRef]));
     const expected = new Map();
     for (const p of d.purchaseOrders) { if (!expected.has(p.salonId)) expected.set(p.salonId, new Set()); expected.get(p.salonId).add(refs.get(p.orderId)); }
     assert.deepEqual(d.accessLogs.map(r => [r.salonId, r.role, r.target, r.count]).sort(), [...expected].map(([salonId, set]) => [salonId, 'ディーラー', '発送先（お名前・郵便番号・住所）', set.size]).sort());
-    assert.ok(d.accessLogs.every(r => r.actorName === 'SENA ディーラー担当'));
+    assert.ok(d.accessLogs.every(r => r.actorName === 'F.I.Tソリューション 出荷担当'));
     // 本部はすべての記録と接続元を見られる。美容室は自店のお客様に関する記録（ディーラーの分も）、ディーラーは自分の記録だけ
     const all = (await e.call('/admin/snapshot', 'GET', undefined, admin)).accessLogs;
     assert.ok(all.some(r => r.actorId === 'salon-a' && r.ip === '198.51.100.2'));
     assert.ok(all.some(r => r.role === 'ディーラー' && r.ip === '192.0.2.44'));
     const mine = (await e.call('/admin/snapshot', 'GET', undefined, salonOp, later(51))).accessLogs;
     assert.ok(mine.every(r => r.salonId === 'lumiere')); assert.ok(mine.some(r => r.role === 'ディーラー'));
-    const other = (await e.call('/admin/snapshot', 'GET', undefined, botanica, later(52))).accessLogs;
-    assert.ok(other.length > 0 && other.every(r => r.actorName === 'BOTANICA ディーラー担当'));
+    const own = (await e.call('/admin/snapshot', 'GET', undefined, shipper, later(52))).accessLogs;
+    assert.ok(own.length > 0 && own.every(r => r.actorName === 'F.I.Tソリューション 出荷担当'), '出荷担当は自分の記録だけ');
     // 記録に個人情報の値は入らない
     const text = JSON.stringify(all);
     for (const value of [secret.name, secret.address, secret.city, secret.postal, 'kojin-taro@example.test']) assert.ok(!text.includes(value), value);

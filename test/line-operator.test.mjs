@@ -41,6 +41,7 @@ test('salon staff link LINE, log in from the LINE mini app and get order and shi
     assert.equal(link.status, 200); assert.equal(link.body.linked, true); assert.equal(link.body.operator.lineLinked, true);
     // 別の管理アカウントには同じ LINE を連携できない
     const adminLogin = await call('/platform/operator/login', 'POST', { email: 'admin@example.test', password: 'Demo-Admin-2026' });
+    const dealerLogin = await call('/platform/operator/login', 'POST', { email: 'dealer@example.test', password: 'Demo-Admin-2026' }); // 加盟店の発注の受付・出荷は F.I.Tソリューション
     assert.equal((await call('/platform/operator/line', 'POST', { idToken: 'idtoken-staff' }, adminLogin.cookie)).status, 409);
     // 次回からは LINE だけでログイン
     const viaLine = await call('/platform/operator/line', 'POST', { idToken: 'idtoken-staff' });
@@ -54,9 +55,9 @@ test('salon staff link LINE, log in from the LINE mini app and get order and shi
     await until(() => pushes.length >= 1);
     assert.equal(pushes[0].to, 'U-staff'); assert.match(pushes[0].messages[0].text, /発注を受け付けました/); assert.ok(pushes[0].messages[0].text.includes(order.body.id));
     assert.equal((await call('/platform/supply/orders', 'POST', input, viaLine.cookie)).body.id, order.body.id);
-    await call('/platform/admin/supply-orders/' + order.body.id, 'PATCH', { status: 'accepted' }, adminLogin.cookie);
-    await call('/platform/admin/supply-orders/' + order.body.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'W-777' }, adminLogin.cookie);
-    await call('/platform/admin/supply-orders/' + order.body.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'W-777' }, adminLogin.cookie);
+    await call('/platform/admin/supply-orders/' + order.body.id, 'PATCH', { status: 'accepted' }, dealerLogin.cookie);
+    await call('/platform/admin/supply-orders/' + order.body.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'W-777' }, dealerLogin.cookie);
+    await call('/platform/admin/supply-orders/' + order.body.id, 'PATCH', { status: 'shipped', carrier: 'デモ配送', tracking: 'W-777' }, dealerLogin.cookie);
     await until(() => pushes.length >= 2);
     assert.match(pushes[1].messages[0].text, /出荷しました/); assert.match(pushes[1].messages[0].text, /W-777/);
     // 定期発注が作成されたときも知らせる

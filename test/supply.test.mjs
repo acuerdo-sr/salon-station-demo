@@ -6,7 +6,7 @@ import { marginFor, nextRunOn, invoiceDueOn, supplySuggestions, addDays } from '
 import { engines } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z'; // 2026-10-06 12:00 JST
-const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] };
+const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, dealer = { operator: demoOperators[2] }; // F.I.Tソリューション：加盟店の発注の受付・出荷と請求書の発行
 const otherSalon = { operator: { id: 'salon-b', role: 'salon', salonId: 'atelier', name: 'atelier 担当' } };
 const later = days => new Date(Date.parse(now) + days * 86400000).toISOString();
 const stockOf = async (e, id) => (await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === id).stock;
@@ -35,7 +35,7 @@ for (const [name, create] of engines(now)) {
     const repair = ws.products.find(p => p.id === 'treatment-repair');
     assert.equal(repair.wholesalePrice, 2288); assert.equal(repair.price, 3520);
     assert.deepEqual(ws.suggestions.map(s => [s.productId, s.quantity, s.averageDays]), [['shampoo-moist', 6, 14]]);
-    await assert.rejects(e.call('/supply', 'GET', undefined, admin), /権限/); await assert.rejects(e.call('/supply', 'GET', undefined, sena), /権限/);
+    await assert.rejects(e.call('/supply', 'GET', undefined, admin), /権限/); await assert.rejects(e.call('/supply', 'GET', undefined, dealer), /権限/);
     const before = await stockOf(e, 'treatment-repair'), input = { requestKey: crypto.randomUUID(), items: [{ id: 'treatment-repair', quantity: 4, price: 2288 }], note: '講習会用' };
     const placed = [], o = await e.call('/supply/orders', 'POST', input, salonOp, now, placed);
     assert.equal(o.total, 2288 * 4 + 660); assert.equal(o.taxTotal, includedTax(o.total)); assert.equal(o.status, 'ordered'); assert.equal(o.billingMonth, '2026-10'); assert.equal(o.note, '講習会用'); assert.equal(o.shipTo.name, 'LUMIÈRE 表参道');
@@ -45,13 +45,13 @@ for (const [name, create] of engines(now)) {
     await assert.rejects(supplyOrder(e, [{ id: 'treatment-repair', quantity: 1, price: 3520 }]), /卸価格/);
     await assert.rejects(supplyOrder(e, [{ id: 'oil-rich', quantity: 1, price: 2145 }]), /在庫/);
     await assert.rejects(supplyOrder(e, [{ id: 'treatment-repair', quantity: 1000, price: 2288 }]), /1〜999/);
-    await assert.rejects(e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'treatment-repair', quantity: 1, price: 2288 }] }, sena), /権限/);
+    await assert.rejects(e.call('/supply/orders', 'POST', { requestKey: crypto.randomUUID(), items: [{ id: 'treatment-repair', quantity: 1, price: 2288 }] }, dealer), /権限/);
     const snap = await e.call('/admin/snapshot', 'GET', undefined, admin);
     assert.equal(snap.supplyOrders[0].id, o.id); assert.equal(snap.products.find(p => p.id === 'treatment-repair').wholesalePrice, 2288);
-    assert.deepEqual((await e.call('/admin/snapshot', 'GET', undefined, sena)).supplyOrders, []);
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, dealer)).supplyOrders[0].id, o.id, 'F.I.Tソリューションは加盟店の発注を受け付ける');
     assert.ok((await e.call('/admin/snapshot', 'GET', undefined, otherSalon)).supplyOrders.every(x => x.salonId === 'atelier'));
     await assert.rejects(e.call('/supply/orders/' + o.id + '/cancel', 'POST', {}, otherSalon), /他店舗/);
-    const move = async (status, effects = []) => { await e.call('/admin/supply-orders/' + o.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'W-1' }, admin, now, effects); return effects; };
+    const move = async (status, effects = []) => { await e.call('/admin/supply-orders/' + o.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'W-1' }, dealer, now, effects); return effects; };
     await assert.rejects(move('shipped'), /順に/); await assert.rejects(e.call('/admin/supply-orders/' + o.id, 'PATCH', { status: 'accepted' }, salonOp), /権限/);
     await move('accepted');
     await assert.rejects(e.call('/supply/orders/' + o.id + '/cancel', 'POST', {}, salonOp), /受け付けた後/);
@@ -64,7 +64,7 @@ for (const [name, create] of engines(now)) {
     assert.equal((await e.call('/supply/orders/' + c.id + '/cancel', 'POST', {}, salonOp)).status, 'cancelled');
     await e.call('/supply/orders/' + c.id + '/cancel', 'POST', {}, salonOp);
     assert.equal(await stockOf(e, 'oil-smooth'), oilBefore + 3);
-    await assert.rejects(e.call('/admin/supply-orders/' + c.id, 'PATCH', { status: 'accepted' }, admin), /キャンセル済み/);
+    await assert.rejects(e.call('/admin/supply-orders/' + c.id, 'PATCH', { status: 'accepted' }, dealer), /キャンセル済み/);
   });
 
   run('reorder and suggestion orders keep their source; a fresh order clears the suggestion', async e => {
@@ -112,28 +112,29 @@ for (const [name, create] of engines(now)) {
   });
 
   run('monthly invoices: only finished months, one per salon, qualified-invoice totals, paid status, invoiced orders locked', async e => {
-    await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-10' }, admin), /月が終わってから/);
-    await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-13' }, admin), /YYYY-MM/);
+    await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, admin), /権限/, '請求書は F.I.Tソリューション が発行する');
+    await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-10' }, dealer), /月が終わってから/);
+    await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-13' }, dealer), /YYYY-MM/);
     await assert.rejects(e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, salonOp), /権限/);
     const september = (await e.call('/supply', 'GET', undefined, salonOp)).orders.filter(o => o.billingMonth === '2026-09');
     assert.equal(september.length, 3);
-    const closed = await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, admin);
+    const closed = await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, dealer);
     assert.equal(closed.created.length, 1);
     const inv = closed.created[0], total = september.reduce((s, o) => s + o.total, 0);
     assert.equal(inv.id, 'INV-202609-lumiere'); assert.equal(inv.orderCount, 3); assert.equal(inv.total, total); assert.equal(inv.taxTotal, includedTax(total)); assert.equal(inv.dueOn, '2026-10-31'); assert.equal(inv.status, 'issued');
-    assert.deepEqual((await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, admin)).created, []);
+    assert.deepEqual((await e.call('/admin/invoices/close', 'POST', { month: '2026-09' }, dealer)).created, []);
     const detail = await e.call('/supply/invoices/' + inv.id, 'GET', undefined, salonOp);
     assert.equal(detail.orders.length, 3); assert.equal(detail.billTo.name, 'ルミエール株式会社（架空）'); assert.ok(detail.issuer.registrationNumber); assert.equal(typeof detail.ecProceeds, 'number');
     assert.equal(detail.orders.reduce((s, o) => s + o.total, 0), total);
     await assert.rejects(e.call('/supply/invoices/' + inv.id, 'GET', undefined, otherSalon), /他店舗/);
-    await assert.rejects(e.call('/supply/invoices/' + inv.id, 'GET', undefined, sena), /権限/);
+    await assert.rejects(e.call('/supply/invoices/' + inv.id, 'GET', undefined, dealer), /権限/);
     assert.ok((await e.call('/supply', 'GET', undefined, salonOp)).orders.filter(o => o.billingMonth === '2026-09').every(o => o.invoiceId === inv.id));
     await assert.rejects(e.call('/admin/invoices/' + inv.id, 'PATCH', { status: 'paid' }, salonOp), /権限/);
-    const paid = await e.call('/admin/invoices/' + inv.id, 'PATCH', { status: 'paid' }, admin, later(3));
+    const paid = await e.call('/admin/invoices/' + inv.id, 'PATCH', { status: 'paid' }, dealer, later(3));
     assert.equal(paid.status, 'paid'); assert.ok(paid.paidAt);
     // 10月の発注は11月に締める。請求済みの発注はキャンセルできない
     const october = await supplyOrder(e, [{ id: 'shampoo-air', quantity: 2, price: 1716 }], {}, '2026-10-20T03:00:00.000Z');
-    const nov = await e.call('/admin/invoices/close', 'POST', { month: '2026-10' }, admin, '2026-11-02T03:00:00.000Z');
+    const nov = await e.call('/admin/invoices/close', 'POST', { month: '2026-10' }, dealer, '2026-11-02T03:00:00.000Z');
     assert.equal(nov.created[0].orderCount, 1); assert.equal(nov.created[0].total, october.total);
     await assert.rejects(e.call('/supply/orders/' + october.id + '/cancel', 'POST', {}, salonOp), /請求書を発行済み/);
     const listed = (await e.call('/admin/snapshot', 'GET', undefined, admin)).invoices.map(i => i.id).sort();
@@ -143,7 +144,7 @@ for (const [name, create] of engines(now)) {
   run('admin sets the wholesale price; dealers cannot', async e => {
     assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, cost: 1716, wholesalePrice: 2000, enabled: true }, admin)).wholesalePrice, 2000);
     await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, price: 2860, cost: 1716, wholesalePrice: 3000, enabled: true }, admin), /卸価格は売価以下/);
-    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, wholesalePrice: 1 }, sena), /在庫数のみ/);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 20, wholesalePrice: 1 }, dealer), /在庫数のみ/);
     assert.equal((await e.call('/supply', 'GET', undefined, salonOp)).products.find(p => p.id === 'shampoo-moist').wholesalePrice, 2000);
     await assert.rejects(supplyOrder(e, [{ id: 'shampoo-moist', quantity: 1, price: 1859 }]), /卸価格/);
   });

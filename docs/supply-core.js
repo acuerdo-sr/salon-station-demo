@@ -1,14 +1,15 @@
 // 加盟店（サロン）からフランチャイザーへの仕入発注・定期発注・発注提案・月次請求・店販の取り分。
 // 検証・計算はブラウザ版（このファイルの supplyRequest）と DB版（db/platform-store.mjs）で共有する。
-import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js?v=c1de43b789';
-import { summarizeCustomers } from './privacy.js?v=c1de43b789';
+import { fail, int, optional, requireOperator, jst, includedTax, shippingFor, feeOf, settlement, requestKeyOf, validateTracking } from './platform-core.js?v=de28f620d4';
+import { summarizeCustomers } from './privacy.js?v=de28f620d4';
 
 export const supplyStatuses = { ordered: '受付待ち', accepted: '出荷準備中', shipped: '出荷済み', delivered: 'お届け済み', cancelled: 'キャンセル' };
 export const SUPPLY_TRANSITIONS = { ordered: 'accepted', accepted: 'shipped', shipped: 'delivered' };
 export const supplySources = { manual: '通常', reorder: '再注文', suggestion: '発注提案', subscription: '定期発注' };
 export const supplyIntervals = { weekly: '毎週', biweekly: '2週間ごと', monthly: '毎月' };
 // 請求書の発行者（架空）。本番ではフランチャイザーの名称・適格請求書発行事業者の登録番号・振込先に置き換える。
-export const ISSUER = { name: 'SALON STATION 本部（架空）', registrationNumber: 'T0000000000000', address: '山口県萩市椿東0-0-0（架空）', phone: '0838-00-0000', bank: 'デモ銀行 本店 普通 0000000（架空）' };
+// 加盟店（美容室）の仕入れの取引先・請求書の発行元：ディーラーの F.I.Tソリューション（BICMA）。登録番号・住所・口座は架空
+export const ISSUER = { name: 'F.I.Tソリューション（BICMA）', registrationNumber: 'T0000000000000', address: '山口県萩市椿東0-0-0（架空）', phone: '0838-00-0000', bank: 'デモ銀行 本店 普通 0000000（架空）' };
 export const wholesaleOf = price => Math.round(price * 0.65);
 export const supplyOrderId = now => 'WO-' + now.slice(2, 10).replaceAll('-', '') + '-' + crypto.randomUUID().slice(0, 5).toUpperCase();
 export const subscriptionId = () => 'SUB-' + crypto.randomUUID().slice(0, 8).toUpperCase();
@@ -159,8 +160,8 @@ function invoiceDetail(state, inv) {
   return { ...invoiceSummary(inv), issuer: { ...ISSUER }, orders: orders.map(o => ({ id: o.id, orderedOn: o.orderedOn, items: clone(o.items), subtotal: o.subtotal, shipping: o.shipping, total: o.total })), ecProceeds: ecProceedsFor(state.orders, inv.salonId, inv.month) };
 }
 export function supplySnapshot(state, op) {
-  if (op.role === 'dealer') return { supplyOrders: [], subscriptions: [], invoices: [] };
-  const mine = x => op.role === 'admin' || x.salonId === op.salonId;
+  // 管理会社（藤井企画）は状況の確認、ディーラー（F.I.Tソリューション）は受付・出荷・請求、加盟店は自店の分
+  const mine = x => op.role === 'admin' || op.role === 'dealer' || x.salonId === op.salonId;
   return { supplyOrders: (state.supplyOrders || []).filter(mine).slice(0, 1000).map(supplyView), subscriptions: clone((state.supplySubscriptions || []).filter(mine)), invoices: (state.invoices || []).filter(mine).map(invoiceSummary) };
 }
 export function supplyRequest(state, route, method, input, actor, now, effects) {
@@ -223,7 +224,7 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
   if (invoice && method === 'GET') { const inv = state.invoices.find(i => i.id === invoice[1]) || fail('請求書が見つかりません。', 404); ownSupply(actor, inv.salonId); return invoiceDetail(state, inv); }
   const ship = route.match(/^\/admin\/supply-orders\/([^/]+)$/);
   if (ship && method === 'PATCH') {
-    const op = requireOperator(actor, ['admin']), order = state.supplyOrders.find(o => o.id === ship[1]) || fail('発注が見つかりません。', 404);
+    const op = requireOperator(actor, ['dealer']), order = state.supplyOrders.find(o => o.id === ship[1]) || fail('発注が見つかりません。', 404);
     if (order.status === 'cancelled') fail('キャンセル済みの発注です。', 409);
     if (input?.status === order.status) return supplyView(order);
     if (SUPPLY_TRANSITIONS[order.status] !== input?.status) fail('受付 → 出荷 → 配達完了の順に操作してください。', 409);
@@ -232,9 +233,9 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
     order.status = input.status; log(state, op, `加盟店発注：${supplyStatuses[order.status]}`, order.id, now);
     return supplyView(order);
   }
-  if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin']); return runSubscriptions(state, now, effects); }
+  if (route === '/admin/supply/run' && method === 'POST') { requireOperator(actor, ['admin', 'dealer']); return runSubscriptions(state, now, effects); }
   if (route === '/admin/invoices/close' && method === 'POST') {
-    const op = requireOperator(actor, ['admin']), month = closableMonth(input, now), created = [];
+    const op = requireOperator(actor, ['dealer']), month = closableMonth(input, now), created = [];
     for (const salon of state.salons) {
       if (state.invoices.some(i => i.salonId === salon.id && i.month === month)) continue;
       const orders = state.supplyOrders.filter(o => o.salonId === salon.id && o.billingMonth === month && o.status !== 'cancelled' && !o.invoiceId);
@@ -248,7 +249,7 @@ export function supplyRequest(state, route, method, input, actor, now, effects) 
   }
   const paid = route.match(/^\/admin\/invoices\/([^/]+)$/);
   if (paid && method === 'PATCH') {
-    const op = requireOperator(actor, ['admin']), inv = state.invoices.find(i => i.id === paid[1]) || fail('請求書が見つかりません。', 404);
+    const op = requireOperator(actor, ['dealer']), inv = state.invoices.find(i => i.id === paid[1]) || fail('請求書が見つかりません。', 404);
     if (input?.status !== 'paid') fail('入金済みにする操作だけができます。');
     if (inv.status !== 'paid') { inv.status = 'paid'; inv.paidAt = now; log(state, op, '請求書を入金済みに更新', inv.id, now); }
     return invoiceSummary(inv);

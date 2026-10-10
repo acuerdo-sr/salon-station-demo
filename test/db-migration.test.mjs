@@ -70,7 +70,7 @@ test('legacy single-JSON database is migrated into the new tables without losing
       assert.equal((await store.request('/admin/snapshot', 'GET', undefined, { operator: demoOperators[1] })).profiles.find(p => p.id === 'old-member').lineLinked, true);
       assert.equal((await store.request('/admin/salons', 'POST', { name: '新店', owner: 'x', prefecture: '山口県', city: '萩市', street: '1', phone: '0838-00-0000' }, admin, now)).id, 'S005');
       // 管理アカウントでログインできる（パスワードはテーブルに保存）
-      assert.equal(Number((await db.get('SELECT COUNT(*) AS n FROM operators')).n), 4);
+      assert.equal(Number((await db.get('SELECT COUNT(*) AS n FROM operators')).n), demoOperators.length);
       // 2回目の起動では何もしない
       assert.equal((await createPlatformStore(db, { catalog: products }).init({ now })).imported, false);
     } finally { await db.close(); }
@@ -86,7 +86,7 @@ test('a fresh database is seeded with the same sample workspace as the browser d
     const counts = {};
     for (const table of ['salons', 'staff', 'dealers', 'categories', 'concerns', 'products', 'product_concerns', 'members', 'orders', 'purchase_orders', 'order_items', 'order_events', 'payments', 'stock_movements', 'audit_logs', 'operators'])
       counts[table] = Number((await db.get(`SELECT COUNT(*) AS n FROM ${table}`)).n);
-    assert.deepEqual(counts, { salons: 3, staff: 5, dealers: 2, categories: new Set(products.map(p => p.category)).size, concerns: 7, products: products.length, product_concerns: products.reduce((n, p) => n + p.concerns.length, 0), members: 8, orders: 8, purchase_orders: 8, order_items: 8, order_events: Number((await db.get('SELECT COUNT(*) AS n FROM order_events')).n), payments: 8, stock_movements: products.length, audit_logs: 8, operators: 4 });
+    assert.deepEqual(counts, { salons: 3, staff: 5, dealers: 1, categories: new Set(products.map(p => p.category)).size, concerns: 7, products: products.length, product_concerns: products.reduce((n, p) => n + p.concerns.length, 0), members: 8, orders: 8, purchase_orders: 8, order_items: 8, order_events: Number((await db.get('SELECT COUNT(*) AS n FROM order_events')).n), payments: 8, stock_movements: products.length, audit_logs: 8, operators: demoOperators.length });
     const browser = createPlatform(products, now);
     const snap = await store.request('/admin/snapshot', 'GET', undefined, admin);
     assert.deepEqual(snap.products.map(p => [p.id, p.stock, p.cost, p.dealerId]), browser.products.map(p => [p.id, p.stock, p.cost, p.dealerId]));

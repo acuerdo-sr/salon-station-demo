@@ -8,7 +8,7 @@ import { formatAddress } from '../dist/person.js';
 import { engines as createEngines, linkMember } from './helpers/engines.mjs';
 
 const now = '2026-10-06T03:00:00.000Z';
-const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, sena = { operator: demoOperators[2] }, botanica = { operator: demoOperators[3] };
+const admin = { operator: demoOperators[0] }, salonOp = { operator: demoOperators[1] }, shipper = { operator: demoOperators[2] }; // ディーラー F.I.Tソリューション（BICMA）の出荷担当。ディーラーはここだけ
 const customer = { name: 'デモ 花子', postal: '0000000', prefecture: '東京都', city: '架空市', street: '1-2-3', phone: '0300000000' };
 customer.address = formatAddress(customer);
 // ブラウザ版・SQLite（・MySQL）の作り方は helpers/engines.mjs に共通化（DB版は個人情報を暗号化して保存）
@@ -43,7 +43,7 @@ for (const [name, create] of engines) {
     assert.equal((await e.call('/profile', 'PATCH', { salonId: 'lumiere' }, a)).staffId, 'haruka', '保存し直しても担当はそのまま');
     assert.deepEqual(await e.call('/admin/members/a/staff', 'PATCH', { staffId: 'yui' }, salonOp), { ref: (await e.call('/admin/snapshot', 'GET', undefined, salonOp)).profiles.find(p => p.id === 'a').ref, staffId: 'yui', staffName: 'YUI' });
     await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: 'mio' }, salonOp), /担当スタッフ/, '他店のスタッフは選べない');
-    await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: 'yui' }, sena), /権限/);
+    await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: 'yui' }, shipper), /権限/);
     assert.equal((await e.call('/admin/members/a', 'PATCH', { salonId: 'atelier', staffId: 'mio' }, admin)).salonId, 'atelier');
     await assert.rejects(e.call('/admin/members/a/staff', 'PATCH', { staffId: '' }, salonOp), /見つかりません/, '他店の会員は操作できない');
     await assert.rejects(e.call('/admin/members/a', 'PATCH', { salonId: 'atelier' }, salonOp), /権限/);
@@ -53,7 +53,7 @@ for (const [name, create] of engines) {
     await assert.rejects(e.call('/profile', 'PATCH', { salonId: 'mori', staffId: '' }, b), /ご利用いただけません/);
   });
 
-  run('order lifecycle: split purchase orders, idempotent replay, shipment effects, return and refund', async e => {
+  run('order lifecycle: one BICMA shipment per order, idempotent replay, shipment effects, return and refund', async e => {
     const a = await linked(e, 'a'), b = await linked(e, 'b'), before = await stockOf(e, 'shampoo-moist');
     const input = { requestKey: crypto.randomUUID(), salonId: 'lumiere', items: [line('shampoo-moist', 2, 2860), line('oil-smooth', 1, 2640)], customer };
     const placed = [], o = await e.call('/orders', 'POST', input, a, now, placed);
@@ -64,24 +64,24 @@ for (const [name, create] of engines) {
     await assert.rejects(e.call('/orders', 'POST', input, b), /取得できません/);
     assert.equal(await stockOf(e, 'shampoo-moist'), before - 2);
     const snap = await e.call('/admin/snapshot', 'GET', undefined, admin), pos = snap.purchaseOrders.filter(p => p.orderId === o.id);
-    assert.equal(pos.length, 2); assert.equal(snap.orders.find(x => x.id === o.id).fee, 418);
-    const senaPo = pos.find(p => p.dealerId === 'sena'), botanicaPo = pos.find(p => p.dealerId === 'botanica');
-    assert.equal(senaPo.total, 1716 * 2 + 660); assert.equal(botanicaPo.total, 1584);
-    const move = async (actor, po, status, effects = []) => { await e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'DEMO-1' }, actor, now, effects); return effects; };
-    await assert.rejects(move(sena, senaPo, 'shipped'), /順に/);
-    await move(sena, senaPo, 'accepted');
-    assert.deepEqual(await move(sena, senaPo, 'shipped'), [{ type: 'shipped', purchaseOrderId: senaPo.id, orderId: o.id, memberId: 'a' }]);
-    assert.deepEqual(await move(sena, senaPo, 'shipped'), []);
-    assert.equal((await e.call('/orders', 'GET', undefined, a))[0].status, 'partially_shipped');
+    // ディーラーは BICMA だけなので、1つの注文の出荷指示は1件（仕入値の合計＋送料）
+    assert.equal(pos.length, 1); assert.equal(snap.orders.find(x => x.id === o.id).fee, 418);
+    const [po] = pos;
+    assert.equal(po.dealerId, 'bicma'); assert.equal(po.total, 1716 * 2 + 1584 + 660);
+    const move = async (actor, status, effects = []) => { await e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'DEMO-1' }, actor, now, effects); return effects; };
+    await assert.rejects(move(shipper, 'shipped'), /順に/);
+    await move(shipper, 'accepted');
+    assert.deepEqual(await move(shipper, 'shipped'), [{ type: 'shipped', purchaseOrderId: po.id, orderId: o.id, memberId: 'a' }]);
+    assert.deepEqual(await move(shipper, 'shipped'), []);
+    assert.equal((await e.call('/orders', 'GET', undefined, a))[0].status, 'shipped');
     await assert.rejects(e.call('/orders/' + o.id + '/cancel', 'POST', {}, a), /出荷後/);
-    await assert.rejects(move(sena, botanicaPo, 'accepted'), /他社/);
-    await move(botanica, botanicaPo, 'accepted'); await move(botanica, botanicaPo, 'shipped');
-    await move(sena, senaPo, 'delivered'); await move(botanica, botanicaPo, 'delivered');
+    await assert.rejects(move(admin, 'delivered'), /権限/, '管理会社（藤井企画）は出荷の状態を変えない');
+    await move(shipper, 'delivered');
     const mine = (await e.call('/orders', 'GET', undefined, a))[0];
-    assert.equal(mine.status, 'delivered'); assert.ok(mine.shipments.every(s => s.tracking === 'DEMO-1')); assert.equal(mine.timeline.length, 7); assert.ok(mine.timeline.every(t => !/SENA|BOTANICA|ディーラー/.test(t.label)), 'お客様の履歴に仕入先を出さない'); assert.ok(mine.shipments.every(s => s.dealerId === undefined && s.dealerName === undefined));
+    assert.equal(mine.status, 'delivered'); assert.ok(mine.shipments.every(s => s.tracking === 'DEMO-1')); assert.equal(mine.timeline.length, 4); assert.ok(mine.timeline.every(t => !/SENA|BOTANICA|ディーラー/.test(t.label)), 'お客様の履歴に仕入先を出さない'); assert.ok(mine.shipments.every(s => s.dealerId === undefined && s.dealerName === undefined));
     await assert.rejects(e.call('/orders/' + o.id + '/return', 'POST', { reason: '' }, a), /入力内容/);
     assert.equal((await e.call('/orders/' + o.id + '/return', 'POST', { reason: 'デモ：返品テスト' }, a)).status, 'return_requested');
-    await assert.rejects(e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, sena), /権限/);
+    await assert.rejects(e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, shipper), /権限/);
     const refunded = await e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, admin);
     assert.equal(refunded.status, 'returned'); assert.equal(refunded.payment, 'クレジットカード・返金済み'); assert.equal(refunded.paymentStatus, 'refunded');
     assert.equal((await e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, admin)).status, 'returned');
@@ -99,7 +99,7 @@ for (const [name, create] of engines) {
     assert.equal(await stockOf(e, 'oil-smooth'), before);
     const po = (await e.call('/admin/snapshot', 'GET', undefined, admin)).purchaseOrders.find(p => p.orderId === o.id);
     assert.equal(po.status, 'cancelled');
-    await assert.rejects(e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status: 'accepted' }, admin), /変更できません/);
+    await assert.rejects(e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status: 'accepted' }, shipper), /変更できません/);
   });
 
   run('validation: bad quantities, stale prices, short stock and paused salons create nothing', async e => {
@@ -114,16 +114,16 @@ for (const [name, create] of engines) {
     assert.deepEqual(await e.call('/orders', 'GET', undefined, a), []);
   });
 
-  run('authorization: dealers and salons see only their own data', async e => {
+  run('authorization: the BICMA shipper sees shipments only; salons see only their own data', async e => {
     const a = await linked(e, 'a');
     await order(e, a, [line('shampoo-moist', 1, 2860), line('oil-smooth', 1, 2640)]);
-    const d = await e.call('/admin/snapshot', 'GET', undefined, sena);
+    const d = await e.call('/admin/snapshot', 'GET', undefined, shipper);
     assert.equal(d.orders.length, 0); assert.equal(d.profiles.length, 0); assert.deepEqual(d.events, []);
-    assert.ok(d.purchaseOrders.length > 0 && d.purchaseOrders.every(p => p.dealerId === 'sena'));
-    assert.ok(d.products.every(p => p.dealerId === 'sena')); assert.deepEqual(d.dealers.map(x => x.id), ['sena']);
-    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5, price: 1 }, sena), /在庫数のみ/);
-    assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5 }, sena)).stock, 5);
-    await assert.rejects(e.call('/admin/products/oil-smooth', 'PATCH', { stock: 5 }, sena), /他社/);
+    assert.ok(d.purchaseOrders.length > 0 && d.purchaseOrders.every(p => p.dealerId === 'bicma'));
+    assert.ok(d.products.every(p => p.dealerId === 'bicma')); assert.deepEqual(d.dealers.map(x => x.id), ['bicma']);
+    await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5, price: 1 }, shipper), /在庫数のみ/);
+    assert.equal((await e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5 }, shipper)).stock, 5);
+    await assert.rejects(e.call('/admin/products/oil-smooth', 'PATCH', { stock: 5 }, { operator: { role: 'dealer', dealerId: 'other', name: 'x' } }), /他社/);
     await assert.rejects(e.call('/admin/products/shampoo-moist', 'PATCH', { stock: 5, price: 1, cost: 1, enabled: true }, salonOp), /権限/);
     const s = await e.call('/admin/snapshot', 'GET', undefined, salonOp);
     assert.ok(s.orders.every(o => o.salonId === 'lumiere')); assert.ok(s.profiles.every(p => p.salonId === 'lumiere')); assert.deepEqual(s.salons.map(x => x.id), ['lumiere']);
@@ -146,7 +146,7 @@ for (const [name, create] of engines) {
     const scoped = await e.call('/admin/sales', 'POST', { unit: 'range', from: '2027-01-01', to: '2027-02-28' }, salonOp);
     assert.deepEqual(scoped.salons.map(x => x.salonId), ['lumiere']); assert.equal(scoped.total.sales, 8360); assert.equal(scoped.rows[0].period, '2027-01-01〜2027-02-28');
     assert.deepEqual((await e.call('/admin/sales', 'POST', { unit: 'year', from: '2030-01-01', to: '2030-12-31' }, admin)).rows, []);
-    await assert.rejects(e.call('/admin/sales', 'POST', {}, sena), /権限/);
+    await assert.rejects(e.call('/admin/sales', 'POST', {}, shipper), /権限/);
   });
 
   run('salon master: auto-numbered IDs are never reused; salon staff edit only basic info; staff ids are kept', async e => {

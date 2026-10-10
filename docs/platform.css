@@ -510,3 +510,33 @@ html{scrollbar-gutter:stable}
 .store-body .register-salon b{font-size:16px;color:var(--fc-ink)}
 .store-body .register-salon span{font-size:11px;color:var(--fc-mute)}
 .member-staff{min-width:120px;padding:6px 8px;font-size:12px}
+/* ===== 管理会社・ディーラーのログイン画面（文字を大きく） ===== */
+.console-login .brand-word{font-size:18px;letter-spacing:.06em}.console-login .brand-word small{font-size:11px;letter-spacing:.08em}
+.console-login .login-brand-side .eyebrow{font-size:15px;letter-spacing:.2em;margin-bottom:22px}
+.console-login .login-brand-side h1{font-size:40px;line-height:1.65}
+.console-login .login-brand-side p{font-size:16px;line-height:2;max-width:520px}
+.console-login .login-box{max-width:470px}
+.console-login .login-box h2{font-size:32px;line-height:1.45;margin-bottom:26px}.console-login .login-box h2 span{font-size:22px;font-weight:400;color:var(--muted)}
+.console-login .login-box label{font-size:15px;margin-bottom:20px}
+.console-login .login-box input{font-size:17px;padding:14px 16px;min-height:52px}
+.console-login .login-box .btn{font-size:17px;min-height:54px}
+.console-login .login-box .notice{font-size:14px;line-height:1.8;margin:0 0 20px}
+.console-login .login-demo-note{font-size:14px;line-height:1.8;color:var(--muted);margin:20px 0 0}
+.console-login .login-links{display:flex;flex-wrap:wrap;gap:12px 22px;margin-top:24px;font-size:15px}.console-login .login-links a{color:var(--green);display:inline-flex;align-items:center;gap:6px}
+@media(max-width:900px){.console-login .login-brand-side h1{font-size:30px}.console-login .login-brand-side p{font-size:15px}.console-login .login-box h2{font-size:28px}}
+/* ===== 加盟店の画面：お客様・店舗・スタッフ ===== */
+.order-body .b2b-sub-head{font-size:18px;font-weight:600;margin:0 0 10px;color:var(--fc-ink)}
+.order-body .customer-search{max-width:420px;margin:16px 0 8px}
+.order-body .customer-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.order-body .customer-main{display:grid;gap:4px;min-width:0}
+.order-body .customer-name{padding:0;text-align:left;font-size:16px;font-weight:600;color:var(--fc-ink)}.order-body .customer-name:hover{text-decoration:underline}
+.order-body .customer-main small{color:var(--fc-mute);font-size:12px}
+.order-body .customer-staff{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--fc-sub);margin:0;white-space:nowrap}
+.order-body .customer-staff select{min-width:150px}
+.order-body .access-row small{color:var(--fc-mute)}
+.order-body .ec-order .num{display:grid;justify-items:end;gap:4px}.order-body .ec-order .num small{color:var(--fc-mute);font-size:12px}
+.order-body .shop-info .between{align-items:center;margin-bottom:6px}
+.order-body .shop-qr-body{display:flex;gap:24px;align-items:center;flex-wrap:wrap}.order-body .shop-qr-body img{border:1px solid var(--fc-line);border-radius:12px;background:#fff}
+.order-body .shop-qr-body .stack{flex:1;min-width:260px}
+.order-body .copy-row{display:flex;gap:8px}.order-body .copy-row input{flex:1;min-width:0}
+@media(max-width:650px){.order-body .customer-staff{width:100%;justify-content:space-between}.order-body .copy-row{flex-direction:column}}

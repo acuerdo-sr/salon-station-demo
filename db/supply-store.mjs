@@ -113,8 +113,8 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
     loadOrders: (q, where, params, limit) => loadSupplyOrders(q, where, params, limit),
     operatorsWithLine: salonId => db.all('SELECT id, line_id FROM operators WHERE salon_id=? AND line_id IS NOT NULL', [salonId]),
     async snapshot(q, op) {
-      if (op.role === 'dealer') return { supplyOrders: [], subscriptions: [], invoices: [] };
-      const scope = op.role === 'admin' ? ['', []] : ['salon_id=?', [op.salonId]];
+      // 管理会社（藤井企画）は状況の確認、ディーラー（F.I.Tソリューション）は受付・出荷・請求、加盟店は自店の分
+      const scope = op.role === 'admin' || op.role === 'dealer' ? ['', []] : ['salon_id=?', [op.salonId]];
       return { supplyOrders: await loadSupplyOrders(q, scope[0], scope[1], 1000), subscriptions: await loadSubscriptions(q, scope[0], scope[1]), invoices: await loadInvoices(q, scope[0], scope[1]) };
     },
     // 該当しない経路では undefined を返す
@@ -170,7 +170,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
       }
       const ship = route.match(/^\/admin\/supply-orders\/([^/]+)$/);
       if (ship && method === 'PATCH') {
-        const op = requireOperator(actor, ['admin']), order = await supplyById(q, ship[1]) || fail('発注が見つかりません。', 404);
+        const op = requireOperator(actor, ['dealer']), order = await supplyById(q, ship[1]) || fail('発注が見つかりません。', 404);
         if (order.status === 'cancelled') fail('キャンセル済みの発注です。', 409);
         if (input?.status === order.status) return order;
         if (SUPPLY_TRANSITIONS[order.status] !== input?.status) fail('受付 → 出荷 → 配達完了の順に操作してください。', 409);
@@ -183,7 +183,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
         return supplyById(q, order.id);
       }
       if (route === '/admin/invoices/close' && method === 'POST') {
-        const op = requireOperator(actor, ['admin']), month = closableMonth(input, now), created = [];
+        const op = requireOperator(actor, ['dealer']), month = closableMonth(input, now), created = [];
         for (const salon of await q.all('SELECT * FROM salons ORDER BY created_at, id')) {
           if (await q.get('SELECT id FROM invoices WHERE salon_id=? AND billing_month=?', [salon.id, month])) continue;
           const orders = await q.all("SELECT id, total FROM supply_orders WHERE salon_id=? AND billing_month=? AND status<>'cancelled' AND invoice_id IS NULL ORDER BY created_at", [salon.id, month]);
@@ -199,7 +199,7 @@ export function createSupplyStore({ db, loadProducts, audit, customerStats }) {
       }
       const paid = route.match(/^\/admin\/invoices\/([^/]+)$/);
       if (paid && method === 'PATCH') {
-        const op = requireOperator(actor, ['admin']), [inv] = await loadInvoices(q, 'id=?', [paid[1]]);
+        const op = requireOperator(actor, ['dealer']), [inv] = await loadInvoices(q, 'id=?', [paid[1]]);
         if (!inv) fail('請求書が見つかりません。', 404);
         if (input?.status !== 'paid') fail('入金済みにする操作だけができます。');
         if (inv.status !== 'paid') { await q.run("UPDATE invoices SET status='paid', paid_at=?, updated_at=? WHERE id=?", [now, now, inv.id]); await audit(q, op, '請求書を入金済みに更新', inv.id, now); }

@@ -1,17 +1,17 @@
 // Shared business rules for the local server and the browser-only public demo.
-import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=c1de43b789';
-import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=c1de43b789';
-import { validateProfile, profileComplete } from './member-store.js?v=c1de43b789';
-import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=c1de43b789';
-import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=c1de43b789';
-import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=c1de43b789';
-import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=c1de43b789';
-import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=c1de43b789';
+import { supplyRequest, supplySnapshot, seedSupply, wholesaleOf, ISSUER, salonAddress } from './supply-core.js?v=de28f620d4';
+import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from './payment-core.js?v=de28f620d4';
+import { validateProfile, profileComplete } from './member-store.js?v=de28f620d4';
+import { nameInput, phoneInput, postalInput, addressPartsInput, formatAddress, decodeAddress } from './person.js?v=de28f620d4';
+import { productInput, categoryInput, nextSku, priceRowsInput, applyPriceRow, decodeImage, newProductId, newCategoryId, seedCategories, CONCERN_NAMES, MAX_DEMO_IMAGE_BYTES, CATEGORY_IDS, CATALOG_VERSION, legacyImages } from './catalog-core.js?v=de28f620d4';
+import { shippingRow, shippingInput, shippingFileName, SHIPPING_COLUMNS, SHIPPABLE, SUPPLY_SHIPPABLE } from './shipping-csv.js?v=de28f620d4';
+import { memberRef, actorLabel, customerFor, orderForRole, summarizeCustomers } from './privacy.js?v=de28f620d4';
+import { viewEntries, shouldRecordView, exportInput, accessLogVisible, accessLogView, accessActions, accessRoles, accessChannels, accessTargets, ACCESS_LOG_LIMIT } from './access-log.js?v=de28f620d4';
 export const demoOperators = [
-  {id:'admin',role:'admin',name:'運営管理者',email:'admin@example.test'},
+  // 管理会社は藤井企画（運営管理の画面 admin.html）。ディーラーは F.I.Tソリューション（BICMA）だけで、すべての仕入れ・出荷を受け持つ（ディーラーの画面 dealer.html）
+  {id:'admin',role:'admin',name:'藤井企画 運営担当',email:'admin@example.test'},
   {id:'salon-a',role:'salon',salonId:'lumiere',name:'LUMIÈRE 店舗担当',email:'salon@example.test'},
-  {id:'dealer-a',role:'dealer',dealerId:'sena',name:'SENA ディーラー担当',email:'dealer@example.test'},
-  {id:'dealer-b',role:'dealer',dealerId:'botanica',name:'BOTANICA ディーラー担当',email:'dealer-b@example.test'},
+  {id:'dealer-a',role:'dealer',dealerId:'bicma',name:'F.I.Tソリューション 出荷担当',email:'dealer@example.test'},
 ];
 export const DEMO_OPERATOR_PASSWORD = 'Demo-Admin-2026';
 export const statuses = {ordered:'発注済み',processing:'出荷準備中',partially_shipped:'一部出荷済み',shipped:'出荷済み',delivered:'お届け済み',cancelled:'キャンセル',return_requested:'返品受付',returned:'返品・返金済み'};
@@ -86,8 +86,8 @@ export const seedSalons=()=>[
   {id:'mori',name:'mori hair & care',area:'YAMAGUCHI / HAGI',description:'自然体の髪に、ちょうどいいケアを。',owner:'株式会社モリ（架空）',prefecture:'山口県',city:'萩市',street:'椿東0-0-0',building:'',phone:'0838-00-0000',hours:'9:00〜18:00',holiday:'毎週月曜日・第3日曜日',notes:'',feeRate:5,enabled:true,staff:[{id:'aoi',name:'AOI'}]},
 ];
 // 保存済みの状態（SQLite / ブラウザ）に、後から追加した項目（お悩みカテゴリ・店舗住所・会員任意項目）を補う。
-// 初期の商品：仕入値は売価の6割、仕入先は商品に指定があればそれ（なければヘアオイルは BOTANICA、ほかは SENA）
-const seedProduct=p=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.dealerId||(p.category==='ヘアオイル'?'botanica':'sena'),stock:p.stock});
+// 初期の商品：仕入値は売価の6割、仕入先（出荷元）はディーラーの BICMA
+const seedProduct=p=>({...p,enabled:true,cost:Math.round(p.price*.6),wholesalePrice:wholesaleOf(p.price),dealerId:p.dealerId||'bicma',stock:p.stock});
 export function migrate(state,catalog){
   let changed=false;
   for(const p of state.products||[]){const src=catalog.find(c=>c.id===p.id);if(!Array.isArray(p.concerns)){p.concerns=[...(src?.concerns||[])];changed=true;}}
@@ -101,6 +101,14 @@ export function migrate(state,catalog){
   for(const k of ['addresses','cards'])if(!state[k]||typeof state[k]!=='object'||Array.isArray(state[k])){state[k]={};changed=true;}
   if(!Array.isArray(state.categories)){state.categories=seedCategories(state.products||[]);changed=true;}
   for(const o of state.orders||[])if(!o.paymentMethod){o.paymentMethod='card';o.paymentStatus=/返金/.test(o.payment||'')?'refunded':'captured';delete o.payment;changed=true;}
+  // ディーラーを BICMA だけにする（以前の SENA・BOTANICA の商品・発注・注文明細は BICMA が出荷する）
+  if(Array.isArray(state.dealers)&&(state.dealers.length!==1||state.dealers[0].id!=='bicma')){
+    state.dealers=seedDealers();
+    for(const p of state.products||[])p.dealerId='bicma';
+    for(const p of state.purchaseOrders||[])p.dealerId='bicma';
+    for(const o of state.orders||[])for(const i of o.items||[])if(i.dealerId)i.dealerId='bicma';
+    changed=true;
+  }
   // 品ぞろえの版2：以前のデータに、まだない初期商品と、そのカテゴリを足す（登録済みの商品・価格は変えない）
   // 版3：一覧の短い説明（summary）と、作り直した初期商品の写真（以前の既定の写真のままの商品だけ）
   // 版4：初期商品の短い説明を書き直した。版3は公開から間もなく書き直したため、版3のデータは初期商品の説明を新しいものに替える
@@ -114,7 +122,7 @@ export function migrate(state,catalog){
   return changed;
 }
 
-export const seedDealers=()=>[{id:'sena',name:'SENA ビューティーサプライ',short:'SENA',area:'東京配送センター',lead:'通常1〜3営業日'},{id:'botanica',name:'BOTANICA ディストリビューション',short:'BOTANICA',area:'福岡配送センター',lead:'通常2〜4営業日'}];
+export const seedDealers=()=>[{id:'bicma',name:'F.I.Tソリューション（BICMA）',short:'BICMA',area:'BICMA 物流センター',lead:'通常1〜3営業日'}];
 export function createPlatform(catalog,now=new Date().toISOString()){
   const state={version:1,revision:0,catalogVersion:CATALOG_VERSION,products:catalog.map(seedProduct),
     salonSeq:3,salons:seedSalons(),dealers:seedDealers(),profiles:[],carts:{},favorites:{},orders:[],purchaseOrders:[],events:[],accessLogs:[],addresses:{},cards:{}};
@@ -309,7 +317,8 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
   }
   const poAction=route.match(/^\/admin\/purchase-orders\/([^/]+)$/);
   if(poAction&&method==='PATCH'){
-    const op=requireOperator(actor,['admin','dealer']),po=state.purchaseOrders.find(p=>p.id===poAction[1]);if(!po)fail('発注が見つかりません。',404);if(op.role==='dealer'&&po.dealerId!==op.dealerId)fail('他社の発注は操作できません。',403);
+    // 注文の確認・出荷は、すべてディーラー（F.I.Tソリューション）が行う。管理会社（藤井企画）は状況を見るだけ
+    const op=requireOperator(actor,['dealer']),po=state.purchaseOrders.find(p=>p.id===poAction[1]);if(!po)fail('発注が見つかりません。',404);if(op.role==='dealer'&&po.dealerId!==op.dealerId)fail('他社の発注は操作できません。',403);
     const order=state.orders.find(o=>o.id===po.orderId);if(['return_requested','returned','cancelled'].includes(order.status))fail('この注文の出荷状態は変更できません。',409);
     if(input?.status===po.status)return clone(po);
     if(PO_TRANSITIONS[po.status]!==input?.status)fail('受付 → 出荷 → 配達完了の順に操作してください。',409);
@@ -372,7 +381,7 @@ export function platformRequest(state,route,method='GET',input,actor={},now=new 
       for(const salonId of [...new Set(rows.map(r=>r.po.salonId))].sort())recordAccess(state,{actorId:op.id||'',actorName:op.name,role:accessRoles.dealer,salonId,action:accessActions.export,target:accessTargets.shippingCsv,count:new Set(rows.filter(r=>r.po.salonId===salonId).map(r=>r.order.memberId)).size,ip:actor.ip},now);
       return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(({po,order,salon})=>shippingRow({reference:po.id,to:order.customer,from:{name:salon.name,postal:'',address:salonAddress(salon),phone:salon.phone},items:po.items,note:`注文 ${order.id}`}))};
     }
-    requireOperator(actor,['admin']);
+    requireOperator(actor,['dealer']);
     const rows=ids.map(id=>{const o=state.supplyOrders.find(x=>x.id===id);if(!o)fail('発注が見つかりません。',404);if(!SUPPLY_SHIPPABLE.includes(o.status))fail('出荷前の発注だけを選んでください。',409);return o;});
     return {filename,columns:SHIPPING_COLUMNS,rows:rows.map(o=>{const salon=salonFor(state,o.salonId);return shippingRow({reference:o.id,to:{name:o.shipTo?.name||salon.name,postal:'',address:o.shipTo?.address||salonAddress(salon),phone:salon.phone},from:{name:ISSUER.name,postal:'',address:ISSUER.address,phone:ISSUER.phone},items:o.items,note:'加盟店発注'});})};
   }

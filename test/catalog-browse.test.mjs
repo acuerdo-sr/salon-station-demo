@@ -45,7 +45,7 @@ test('older browser data gains the new sample products and categories once, with
   const boot = platformRequest(state, '/bootstrap', 'GET', undefined, { member });
   assert.equal(boot.products.length, products.length);
   assert.ok(boot.categories.some(c => c.name === 'スカルプケア'));
-  assert.equal(state.products.find(p => p.id === 'calme-scalp-serum').dealerId, 'botanica', '仕入先は商品の指定どおり');
+  assert.equal(state.products.find(p => p.id === 'calme-scalp-serum').dealerId, 'bicma', '仕入先（出荷元）は BICMA');
 });
 
 test('the short description for product lists is optional and limited to 60 characters', () => {
@@ -62,4 +62,17 @@ test('browser data from catalogue version 3 picks up the rewritten short descrip
   assert.equal(migrate(state, products), true);
   assert.equal(state.products[0].summary, products[0].summary);
   assert.equal(state.catalogVersion, CATALOG_VERSION);
+});
+
+test('older browser data with the SENA and BOTANICA dealers is moved to BICMA, the only dealer', () => {
+  const state = createPlatform(products.slice(0, 6), '2026-10-09T03:00:00.000Z');
+  state.dealers = [{ id: 'sena', name: 'SENA' }, { id: 'botanica', name: 'BOTANICA' }];
+  state.products[0].dealerId = 'sena'; state.products[2].dealerId = 'botanica';
+  state.purchaseOrders = [{ id: 'PO-1', dealerId: 'botanica', items: [] }];
+  state.orders = [{ id: 'O-1', items: [{ id: 'oil-smooth', dealerId: 'botanica' }] }];
+  assert.equal(migrate(state, products), true);
+  assert.deepEqual(state.dealers.map(d => d.id), ['bicma']);
+  assert.ok(state.products.every(p => p.dealerId === 'bicma'));
+  assert.equal(state.purchaseOrders[0].dealerId, 'bicma'); assert.equal(state.orders[0].items[0].dealerId, 'bicma');
+  assert.equal(migrate(state, products), false, '2回目は何もしない');
 });
