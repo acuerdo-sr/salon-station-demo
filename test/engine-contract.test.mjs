@@ -30,7 +30,7 @@ for (const [name, create] of engines) {
     assert.equal(boot.products.length, catalogProducts.length); assert.equal(boot.products[0].cost, undefined);
     assert.deepEqual(boot.products.find(p => p.id === 'shampoo-moist').concerns, ['ダメージヘア対策', 'カラーケア']);
     assert.equal(boot.salons.find(s => s.id === 'lumiere').staff.map(s => s.name).join(), 'HARUKA,YUI');
-    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === 'shampoo-moist').cost, 1716);
+    assert.equal((await e.call('/admin/snapshot', 'GET', undefined, admin)).products.find(p => p.id === 'shampoo-moist').cost, 1430);
     await assert.rejects(e.call('/quote', 'POST', { salonId: 'lumiere', items: [line('shampoo-moist', 1, 2860)] }, {}), /ログイン/);
   });
 
@@ -67,7 +67,7 @@ for (const [name, create] of engines) {
     // ディーラーは BICMA だけなので、1つの注文の出荷指示は1件（仕入値の合計＋送料）
     assert.equal(pos.length, 1); assert.equal(snap.orders.find(x => x.id === o.id).fee, 418);
     const [po] = pos;
-    assert.equal(po.dealerId, 'bicma'); assert.equal(po.total, 1716 * 2 + 1584 + 660);
+    assert.equal(po.dealerId, 'bicma'); assert.equal(po.total, 1430 * 2 + 1320 + 660);
     const move = async (actor, status, effects = []) => { await e.call('/admin/purchase-orders/' + po.id, 'PATCH', { status, carrier: 'デモ配送', tracking: 'DEMO-1' }, actor, now, effects); return effects; };
     await assert.rejects(move(shipper, 'shipped'), /順に/);
     await move(shipper, 'accepted');
@@ -81,10 +81,14 @@ for (const [name, create] of engines) {
     assert.equal(mine.status, 'delivered'); assert.ok(mine.shipments.every(s => s.tracking === 'DEMO-1')); assert.equal(mine.timeline.length, 4); assert.ok(mine.timeline.every(t => !/SENA|BOTANICA|ディーラー/.test(t.label)), 'お客様の履歴に仕入先を出さない'); assert.ok(mine.shipments.every(s => s.dealerId === undefined && s.dealerName === undefined));
     await assert.rejects(e.call('/orders/' + o.id + '/return', 'POST', { reason: '' }, a), /入力内容/);
     assert.equal((await e.call('/orders/' + o.id + '/return', 'POST', { reason: 'デモ：返品テスト' }, a)).status, 'return_requested');
-    await assert.rejects(e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, shipper), /権限/);
-    const refunded = await e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, admin);
+    // 返品の検品・返金は F.I.Tソリューション。管理会社と加盟店はできない
+    await assert.rejects(e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, admin), /権限/);
+    await assert.rejects(e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, salonOp), /権限/);
+    const snapForShipper = await e.call('/admin/snapshot', 'GET', undefined, shipper), returned = snapForShipper.purchaseOrders.find(p => p.orderId === o.id);
+    assert.equal(returned.orderStatus, 'return_requested'); assert.equal(returned.returnReason, 'デモ：返品テスト'); assert.equal(returned.orderTotal, 9020);
+    const refunded = await e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, shipper);
     assert.equal(refunded.status, 'returned'); assert.equal(refunded.payment, 'クレジットカード・返金済み'); assert.equal(refunded.paymentStatus, 'refunded');
-    assert.equal((await e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, admin)).status, 'returned');
+    assert.equal((await e.call('/admin/orders/' + o.id + '/refund', 'POST', {}, shipper)).status, 'returned');
     assert.equal(await stockOf(e, 'shampoo-moist'), before);
     const settlement = (await e.call('/admin/snapshot', 'GET', undefined, admin)).settlements.find(s => s.orderId === o.id);
     assert.equal(settlement.refunded, 9020); assert.equal(settlement.proceeds, 0);
@@ -93,6 +97,11 @@ for (const [name, create] of engines) {
   run('cancellation restores stock once and blocks shipment', async e => {
     const a = await linked(e, 'a'), before = await stockOf(e, 'oil-smooth');
     const o = await order(e, a, [line('oil-smooth', 3, 2640)]);
+    // お客様のほかにキャンセルできるのは F.I.Tソリューション だけ
+    await assert.rejects(e.call('/orders/' + o.id + '/cancel', 'POST', {}, admin), /操作できません/);
+    await assert.rejects(e.call('/orders/' + o.id + '/cancel', 'POST', {}, salonOp), /操作できません/);
+    const other = await order(e, a, [line('oil-smooth', 1, 2640)]);
+    assert.equal((await e.call('/orders/' + other.id + '/cancel', 'POST', {}, shipper)).status, 'cancelled');
     const cancelled = await e.call('/orders/' + o.id + '/cancel', 'POST', {}, a);
     assert.equal(cancelled.status, 'cancelled'); assert.equal(cancelled.payment, 'クレジットカード・返金済み'); assert.equal(cancelled.paymentStatus, 'refunded');
     await e.call('/orders/' + o.id + '/cancel', 'POST', {}, a);

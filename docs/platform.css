@@ -540,3 +540,11 @@ html{scrollbar-gutter:stable}
 .order-body .shop-qr-body .stack{flex:1;min-width:260px}
 .order-body .copy-row{display:flex;gap:8px}.order-body .copy-row input{flex:1;min-width:0}
 @media(max-width:650px){.order-body .customer-staff{width:100%;justify-content:space-between}.order-body .copy-row{flex-direction:column}}
+/* ===== 管理会社・ディーラーの画面：文字を読みやすい大きさに（本文13〜14px、最小12px。会計ソフト程度） ===== */
+.admin-body{font-size:14px}
+.admin-body td,.admin-body label,.admin-body .detail-list,.admin-body .timeline li,.admin-body .shipment,.admin-body .description,.admin-body .return-reason,.admin-body .total-list>div,.admin-body .order-line strong,.admin-body .btn,.admin-body .side-nav button,.admin-body .task-item strong{font-size:14px}
+.admin-body th,.admin-body .btn.small,.admin-body .row-button,.admin-body .text-link,.admin-body .notice,.admin-body .subtle-note,.admin-body .operator-card strong,.admin-body .breadcrumb,.admin-body .topbar-tools,.admin-body .topbar-tools .btn,.admin-body .page-title p,.admin-body .panel-head p,.admin-body .panel-head .text-link,.admin-body .metric-top,.admin-body .rank-copy b,.admin-body .period-chip,.admin-body .price-grid th,.admin-body .price-grid td,.admin-body .copy-row input,.admin-body .inline-code{font-size:13px}
+.admin-body td small,.admin-body .order-line small,.admin-body .timeline time,.admin-body .invoice-lines td small,.admin-body .sales-table td.num small,.admin-body .pill,.admin-body .badge,.admin-body .nav-count,.admin-body .line-pill,.admin-body .sidebar-help,.admin-body .sidebar-help b,.admin-body .operator-card small,.admin-body .metric-bottom,.admin-body .task-item small,.admin-body .rank-copy small,.admin-body .activity-item,.admin-body .activity-item small,.admin-body .activity-item time,.admin-body .chart-legend,.admin-body .sales-chart text,.admin-body .sales-form label,.admin-body .salon-kpis small,.admin-body .salon-card p,.admin-body .stat-strip,.admin-body .avatar{font-size:12px}
+.admin-body .eyebrow,.admin-body .sidebar-label,.admin-body .admin-foot{font-size:11px}
+.admin-body input,.admin-body select,.admin-body textarea,.admin-body .filter-search input,.admin-body .filter-bar select,.admin-body .sales-form input,.admin-body .sales-form select{font-size:14px}
+.admin-body td small{line-height:1.6}

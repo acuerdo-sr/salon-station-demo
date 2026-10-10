@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import {
   fail, required, int, salonInput, staffList, staffSummary, staffNameInput, staffMoveInput, staffRoute, staffStatsOf, newStaffId, MAX_STAFF, salesUnits, salesRange, jst, includedTax, shippingFor, orderFingerprint, requestKeyOf,
   orderCustomer, newOrderId, purchaseOrderId, feeOf, PO_TRANSITIONS, orderStatusFrom, validateTracking, cartInput, favoritesInput,
-  settlement, requireOperator, allowedOrder, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
+  settlement, requireOperator, statuses, poStatuses, createPlatform, migrate, demoOperators, DEMO_OPERATOR_PASSWORD,
   addressInput, sortAddresses, addressView, cardView, sortCards, shipmentLabel, MAX_ADDRESSES,
 } from '../dist/platform-core.js';
 import { paymentInput, paymentLabel, testCharge, cardInput, paymentAfterCancel, ORDER_PLACED_LABEL, MAX_CARDS } from '../dist/payment-core.js';
@@ -264,7 +264,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const dealers = await loadDealers(q, op.role === 'dealer' ? op.dealerId : null), allDealers = await loadDealers(q);
     const orders = await loadOrders(q, scope[0], scope[1], SNAPSHOT_LIMIT);
     const poScope = op.role === 'admin' ? ['', []] : op.role === 'salon' ? ['WHERE po.salon_id=?', [op.salonId]] : ['WHERE po.dealer_id=?', [op.dealerId]];
-    const poRows = await q.all(`SELECT po.*, o.salon_name, o.member_id, o.ship_name, o.ship_postal, o.ship_address, o.ship_email, o.payment_method, o.payment_status FROM purchase_orders po JOIN orders o ON o.id=po.order_id ${poScope[0]} ORDER BY po.created_at DESC, po.id DESC LIMIT ${SNAPSHOT_LIMIT}`, poScope[1]);
+    const poRows = await q.all(`SELECT po.*, o.salon_name, o.member_id, o.ship_name, o.ship_postal, o.ship_address, o.ship_email, o.payment_method, o.payment_status, o.status AS order_status, o.total AS order_total, o.return_reason FROM purchase_orders po JOIN orders o ON o.id=po.order_id ${poScope[0]} ORDER BY po.created_at DESC, po.id DESC LIMIT ${SNAPSHOT_LIMIT}`, poScope[1]);
     const poItems = poRows.length ? await q.all(`SELECT * FROM order_items WHERE purchase_order_id IN (${marks(poRows)}) ORDER BY line_no`, poRows.map(p => p.id)) : [];
     const salonIds = op.role === 'admin' ? undefined : op.role === 'salon' ? [op.salonId] : [...new Set(poRows.map(p => p.salon_id))];
     // 顧客データ：サロンは自店のお客様の全項目、本部は会員番号と集計値だけ、ディーラーは発送に必要な項目だけ（dist/privacy.js）
@@ -278,7 +278,7 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
       products: await loadProducts(q, { dealerId: op.role === 'dealer' ? op.dealerId : undefined, withCost: true }),
       salons, dealers,
       orders: views.map(o => orderForRole(op.role, o)),
-      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: decodeAddress(o.ship_address).address, postal: o.ship_postal, email: o.ship_email }, p.member_id) }; }),
+      purchaseOrders: poRows.map(p => { const o = openRow(c, 'orders', p); return { ...poView(p, poItems.filter(i => i.purchase_order_id === p.id)), salonName: p.salon_name, customer: customerFor(op.role, { name: o.ship_name, address: decodeAddress(o.ship_address).address, postal: o.ship_postal, email: o.ship_email }, p.member_id), orderStatus: p.order_status, orderTotal: num(p.order_total), returnReason: o.return_reason || '', payment: paymentLabel(p.payment_method, p.payment_status) }; }),
       categories: op.role === 'admin' ? await categoryList(q) : [], concernNames: await concernList(q),
       profiles: members.map(m => ({ ...profileFrom(m), ref: memberRef(m.id) })),
       staffStats: op.role === 'dealer' ? [] : staffStatsOf((await q.all('SELECT salon_id, staff_id FROM members WHERE salon_id IS NOT NULL')).filter(m => op.role === 'admin' || m.salon_id === op.salonId).map(m => ({ salonId: m.salon_id, staffId: m.staff_id || '' }))),
@@ -440,8 +440,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     const customerAction = route.match(/^\/orders\/([^/]+)\/(cancel|return)$/);
     if (customerAction && method === 'POST') {
       const order = await q.get('SELECT * FROM orders WHERE id=?', [customerAction[1]]); if (!order) fail('注文が見つかりません。', 404);
+      // お客様本人のほかは、ディーラー（F.I.Tソリューション）だけがキャンセルできる。返品の申請はお客様本人だけ
       const own = order.member_id === actor.member?.id;
-      if (!own && !allowedOrder(actor, { salonId: order.salon_id })) fail('この注文を操作できません。', 403);
+      const dealerOwns = actor.operator?.role === 'dealer' && Boolean(await q.get('SELECT id FROM purchase_orders WHERE order_id=? AND dealer_id=?', [order.id, actor.operator.dealerId]));
+      if (!own && !(dealerOwns && customerAction[2] === 'cancel')) fail('この注文を操作できません。', 403);
       const by = own ? actor.member : actor.operator;
       if (customerAction[2] === 'cancel') {
         if (order.status === 'cancelled') return orderById(q, order.id);
@@ -486,8 +488,10 @@ export function createPlatformStore(db, { catalog, concernNames = [], fieldCrypt
     }
     const refundAction = route.match(/^\/admin\/orders\/([^/]+)\/refund$/);
     if (refundAction && method === 'POST') {
-      const op = requireOperator(actor, ['admin']);
+      // 返品の検品・返金はディーラー（F.I.Tソリューション）が行う
+      const op = requireOperator(actor, ['dealer']);
       const order = await q.get('SELECT * FROM orders WHERE id=?', [refundAction[1]]); if (!order) fail('注文が見つかりません。', 404);
+      if (!(await q.get('SELECT id FROM purchase_orders WHERE order_id=? AND dealer_id=?', [order.id, op.dealerId]))) fail('他社の注文は操作できません。', 403);
       if (order.status === 'returned') return orderById(q, order.id);
       if (order.status !== 'return_requested') fail('返品申請済みの注文を選んでください。', 409);
       await q.run("UPDATE orders SET status='returned', payment_status=?, updated_at=? WHERE id=?", [paymentAfterCancel(order.payment_status), now, order.id]);

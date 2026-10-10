@@ -86,3 +86,17 @@ test('older browser data gains the wholesale price on order lines and the referr
   assert.equal(state.supplyOrders[0].feeRate, state.salons.find(s => s.id === 'lumiere').feeRate, '紹介料率');
   assert.equal(migrate(state, products), false);
 });
+
+test('older browser data moves the demo purchase cost from 60% to 50% of the price, so F.I.T keeps a margin', () => {
+  const state = createPlatform(products.slice(0, 6), '2026-10-09T03:00:00.000Z');
+  state.catalogVersion = 4;
+  for (const p of state.products) p.cost = Math.round(p.price * 0.6);
+  state.products[1].cost = 1234; // 管理画面で変えた原価
+  const sample = state.orders.find(o => o.sample); for (const i of sample.items) i.cost = Math.round(i.price * 0.6);
+  assert.equal(migrate(state, products), true);
+  assert.equal(state.products[0].cost, Math.round(state.products[0].price * 0.5));
+  assert.equal(state.products[1].cost, 1234, '変えた原価はそのまま');
+  assert.ok(sample.items.every(i => i.cost === Math.round(i.price * 0.5)), '初期サンプルの注文も直す');
+  const po = state.purchaseOrders.find(p => p.orderId === sample.id);
+  assert.equal(po.total, po.items.reduce((n, i) => n + i.cost * i.quantity, 0) + po.shipping);
+});
